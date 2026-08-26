@@ -100,9 +100,9 @@ for (let i = 0; i < (IS_MOBILE ? 12 : 20); i++) {
   clouds.push({ sp, spd: 1.1 + Math.random() * 1.5 });
 }
 
-scene.add(new THREE.HemisphereLight(0xd3e8f4, 0xd9c9a6, 0.72));
-scene.add(new THREE.AmbientLight(0xfff4e4, 0.48));
-const sun = new THREE.DirectionalLight(0xfff1d2, 1.0);
+scene.add(new THREE.HemisphereLight(0xd3e8f4, 0xd9c9a6, 0.6));
+scene.add(new THREE.AmbientLight(0xfff4e4, 0.36));
+const sun = new THREE.DirectionalLight(0xfff1d2, 1.12);
 sun.position.set(46, 86, 38);
 sun.castShadow = true;
 sun.shadow.mapSize.set(CFG.shadowSize, CFG.shadowSize);
@@ -118,7 +118,7 @@ scene.add(sun, sun.target);
 /* ---------- toon shading ---------- */
 function toonGradient(n) {
   const d = new Uint8Array(n);
-  for (let i = 0; i < n; i++) d[i] = Math.round(255 * (0.72 + 0.28 * i / (n - 1)));
+  for (let i = 0; i < n; i++) d[i] = Math.round(255 * (0.66 + 0.34 * i / (n - 1)));
   const t = new THREE.DataTexture(d, n, 1, THREE.RedFormat);
   t.minFilter = t.magFilter = THREE.LinearFilter;
   t.needsUpdate = true;
@@ -127,15 +127,16 @@ function toonGradient(n) {
 const GRAD = toonGradient(3);
 
 /* 水粉插画调色：降饱和 + 暖色抬暗部，让贴图从「游戏色」变成「颜料色」 */
-const WASH = { sat: 0.78, lift: 0.1, gain: 0.97 };
+const WASH = { sat: 0.95, lift: 0.04, gain: 1.0 };
 function pastel(m) {
+  const f = v => v.toFixed(4);
   m.onBeforeCompile = shader => {
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <map_fragment>',
       `#include <map_fragment>
        float wg = dot(diffuseColor.rgb, vec3(0.299,0.587,0.114));
-       diffuseColor.rgb = mix(vec3(wg), diffuseColor.rgb, ${WASH.sat});
-       diffuseColor.rgb = diffuseColor.rgb * ${WASH.gain} + vec3(${WASH.lift}, ${WASH.lift * 0.86}, ${WASH.lift * 0.62});`);
+       diffuseColor.rgb = mix(vec3(wg), diffuseColor.rgb, ${f(WASH.sat)});
+       diffuseColor.rgb = diffuseColor.rgb * ${f(WASH.gain)} + vec3(${f(WASH.lift)}, ${f(WASH.lift * 0.86)}, ${f(WASH.lift * 0.62)});`);
   };
   m.customProgramCacheKey = () => 'pastel';
   return m;
