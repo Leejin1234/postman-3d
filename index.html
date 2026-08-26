@@ -78,6 +78,10 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
 .bbtn:active { transform:translateY(2px); }
 .bbtn em { font-size:20px; font-style:normal; line-height:1; }
 .bbtn span { font-size:12px; font-weight:800; color:#6b4310; margin-top:2px; }
+.bbtn img { height:84px; display:block; }
+.bbtn.img { width:auto; height:auto; padding:0; background:none; border:none; box-shadow:none;
+            filter:drop-shadow(0 3px 5px rgba(0,0,0,.35)); }
+.bbtn.img em, .bbtn.img span { display:none; }
 
 .stick { position:absolute; left:16px; bottom:88px; width:104px; height:104px; border-radius:50%;
          background:rgba(255,255,255,.16); border:2px solid rgba(255,255,255,.5); }
@@ -87,9 +91,16 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
        background:rgba(255,180,46,.88); border:3px solid #fff; color:#fff; font-size:14px; font-weight:800;
        display:flex; align-items:center; justify-content:center; box-shadow:0 3px 8px rgba(0,0,0,.3); }
 .gas:active { background:rgba(255,140,20,.95); }
+.gas.img:active, .brake.img:active { transform:scale(.93); }
 .brake { position:absolute; right:100px; bottom:98px; width:56px; height:56px; border-radius:50%;
          background:rgba(60,70,80,.7); border:3px solid #fff; color:#fff; font-size:12px; font-weight:800;
          display:flex; align-items:center; justify-content:center; }
+.gas img, .brake img { width:100%; height:100%; display:block; }
+.bbtn img, .gas img, .brake img { pointer-events:none; }
+.gas.img, .brake.img { background:none; border:none; box-shadow:none; font-size:0;
+                       filter:drop-shadow(0 3px 6px rgba(0,0,0,.35)); }
+.gas.img { width:80px; height:80px; }
+.brake.img { width:60px; height:60px; right:104px; bottom:100px; }
 
 .toast { position:absolute; top:40%; left:50%; transform:translate(-50%,-50%) scale(.9); opacity:0;
          background:rgba(0,0,0,.75); color:#fff; padding:10px 18px; border-radius:20px; font-size:15px;
@@ -139,6 +150,9 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
   .gear { width:28px; height:28px; font-size:15px; }
   .taskbar, #mini { top:78px; }
   .compass { top:180px; }
+  .bbtn img { height:74px; }
+  .gas.img { width:74px; height:74px; }
+  .brake.img { width:56px; height:56px; }
 }
 </style>
 <script type="importmap">
@@ -186,13 +200,18 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
          text-shadow:0 1px 2px #000;white-space:pre-wrap;"></div>
 
     <div class="stick" id="stick"><i id="knob"></i></div>
-    <div class="brake" id="brake">刹车</div>
-    <div class="gas" id="gas">油门</div>
+    <div class="brake" id="brake">刹车<img src="./assets/ui/btn-brake.png" alt=""
+         onload="this.parentNode.classList.add('img')" onerror="this.remove()"></div>
+    <div class="gas" id="gas">油门<img src="./assets/ui/btn-gas.png" alt=""
+         onload="this.parentNode.classList.add('img')" onerror="this.remove()"></div>
 
     <div class="bottom">
-      <div class="bbtn" data-panel="bag"><em>🎒</em><span>背包</span></div>
-      <div class="bbtn" data-panel="task"><em>📒</em><span>任务笔记</span></div>
-      <div class="bbtn" data-panel="shop"><em>🛒</em><span>商店</span></div>
+      <div class="bbtn" data-panel="bag"><em>🎒</em><span>背包</span><img src="./assets/ui/btn-bag.png" alt=""
+           onload="this.parentNode.classList.add('img')" onerror="this.remove()"></div>
+      <div class="bbtn" data-panel="task"><em>📒</em><span>任务笔记</span><img src="./assets/ui/btn-note.png" alt=""
+           onload="this.parentNode.classList.add('img')" onerror="this.remove()"></div>
+      <div class="bbtn" data-panel="shop"><em>🛒</em><span>商店</span><img src="./assets/ui/btn-shop.png" alt=""
+           onload="this.parentNode.classList.add('img')" onerror="this.remove()"></div>
     </div>
 
     <div class="toast" id="toast"></div>
