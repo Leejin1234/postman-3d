@@ -21,7 +21,7 @@ const CFG = {
   reachRadius: 4.2,
   shadowSize: IS_MOBILE ? 1024 : 2048,
   shadowSpan: IS_MOBILE ? 38 : 52,
-  fog: IS_MOBILE ? [110, 260] : [150, 360],
+  fog: IS_MOBILE ? [90, 230] : [120, 320],
   maxDpr: IS_MOBILE ? 1.6 : 2
 };
 
@@ -44,7 +44,7 @@ renderer.shadowMap.type = IS_MOBILE ? THREE.PCFShadowMap : THREE.PCFSoftShadowMa
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0xd8ecfb, CFG.fog[0], CFG.fog[1]);
+scene.fog = new THREE.Fog(0xf0e5c8, CFG.fog[0], CFG.fog[1]);
 
 const camera = new THREE.PerspectiveCamera(52, 1, 0.15, IS_MOBILE ? 600 : 900);
 camera.position.set(0, 6, -10);
@@ -54,15 +54,15 @@ const sky = new THREE.Mesh(
   new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
     uniforms: {
-      top: { value: new THREE.Color(0x1f7fd6) },
-      mid: { value: new THREE.Color(0x62b7f0) },
-      bot: { value: new THREE.Color(0xd7f0ff) }
+      top: { value: new THREE.Color(0x74b0dc) },
+      mid: { value: new THREE.Color(0xa9d3ea) },
+      bot: { value: new THREE.Color(0xf8eecd) }
     },
     vertexShader: `varying float h; void main(){ vec4 w = modelMatrix*vec4(position,1.0);
       h = normalize(position).y; gl_Position = projectionMatrix*viewMatrix*w; }`,
     fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 bot; varying float h;
       void main(){ float t = clamp(h,-1.0,1.0);
-        vec3 c = t > 0.16 ? mix(mid,top,smoothstep(0.16,0.9,t)) : mix(bot,mid,smoothstep(-0.2,0.16,t));
+        vec3 c = t > 0.17 ? mix(mid,top,smoothstep(0.17,0.86,t)) : mix(bot,mid,smoothstep(-0.05,0.17,t));
         gl_FragColor = vec4(c,1.0); }`
   })
 );
@@ -73,33 +73,42 @@ function cloudTexture() {
   const cv = document.createElement('canvas');
   cv.width = 256; cv.height = 128;
   const g = cv.getContext('2d');
-  g.fillStyle = '#ffffff';
-  [[70, 78, 42], [120, 62, 52], [175, 80, 38], [100, 92, 34], [148, 95, 30]]
-    .forEach(([x, y, r]) => { g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); });
+  const puff = (x, y, r, warm) => {
+    const rg = g.createRadialGradient(x, y, r * 0.15, x, y, r);
+    rg.addColorStop(0, warm ? 'rgba(252,246,232,1)' : 'rgba(255,255,255,1)');
+    rg.addColorStop(0.62, warm ? 'rgba(250,242,224,.95)' : 'rgba(255,255,255,.96)');
+    rg.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = rg;
+    g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+  };
+  [[74, 74, 40], [118, 56, 50], [172, 76, 38], [102, 88, 34], [146, 90, 32], [200, 92, 26]]
+    .forEach(([x, y, r]) => puff(x, y, r, false));
+  [[96, 100, 30], [150, 104, 26]].forEach(([x, y, r]) => puff(x, y, r, true));
   const t = new THREE.CanvasTexture(cv);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 const cloudTex = cloudTexture();
 const clouds = [];
-for (let i = 0; i < (IS_MOBILE ? 10 : 16); i++) {
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.95, fog: false, depthWrite: false }));
+for (let i = 0; i < (IS_MOBILE ? 12 : 20); i++) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.9, fog: false, depthWrite: false }));
   const a = Math.random() * Math.PI * 2, r = 150 + Math.random() * 200;
-  sp.position.set(Math.cos(a) * r, 60 + Math.random() * 70, Math.sin(a) * r);
-  const s = 55 + Math.random() * 65;
-  sp.scale.set(s, s * 0.5, 1);
+  sp.position.set(Math.cos(a) * r, 48 + Math.random() * 80, Math.sin(a) * r);
+  const s = 70 + Math.random() * 90;
+  sp.scale.set(s, s * 0.46, 1);
   scene.add(sp);
   clouds.push({ sp, spd: 1.1 + Math.random() * 1.5 });
 }
 
-scene.add(new THREE.HemisphereLight(0xdcf1ff, 0x9aa3a0, 0.5));
-scene.add(new THREE.AmbientLight(0xffffff, 0.34));
-const sun = new THREE.DirectionalLight(0xfff6e6, 1.15);
+scene.add(new THREE.HemisphereLight(0xd3e8f4, 0xd9c9a6, 0.72));
+scene.add(new THREE.AmbientLight(0xfff4e4, 0.48));
+const sun = new THREE.DirectionalLight(0xfff1d2, 1.0);
 sun.position.set(46, 86, 38);
 sun.castShadow = true;
 sun.shadow.mapSize.set(CFG.shadowSize, CFG.shadowSize);
 sun.shadow.bias = -0.0006;
 sun.shadow.normalBias = 0.04;
+sun.shadow.radius = IS_MOBILE ? 2 : 4;
 const sc = sun.shadow.camera;
 sc.left = -CFG.shadowSpan; sc.right = CFG.shadowSpan;
 sc.top = CFG.shadowSpan; sc.bottom = -CFG.shadowSpan;
@@ -109,13 +118,28 @@ scene.add(sun, sun.target);
 /* ---------- toon shading ---------- */
 function toonGradient(n) {
   const d = new Uint8Array(n);
-  for (let i = 0; i < n; i++) d[i] = Math.round(255 * (0.58 + 0.42 * i / (n - 1)));
+  for (let i = 0; i < n; i++) d[i] = Math.round(255 * (0.72 + 0.28 * i / (n - 1)));
   const t = new THREE.DataTexture(d, n, 1, THREE.RedFormat);
-  t.minFilter = t.magFilter = THREE.NearestFilter;
+  t.minFilter = t.magFilter = THREE.LinearFilter;
   t.needsUpdate = true;
   return t;
 }
-const GRAD = toonGradient(4);
+const GRAD = toonGradient(3);
+
+/* 水粉插画调色：降饱和 + 暖色抬暗部，让贴图从「游戏色」变成「颜料色」 */
+const WASH = { sat: 0.78, lift: 0.1, gain: 0.97 };
+function pastel(m) {
+  m.onBeforeCompile = shader => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <map_fragment>',
+      `#include <map_fragment>
+       float wg = dot(diffuseColor.rgb, vec3(0.299,0.587,0.114));
+       diffuseColor.rgb = mix(vec3(wg), diffuseColor.rgb, ${WASH.sat});
+       diffuseColor.rgb = diffuseColor.rgb * ${WASH.gain} + vec3(${WASH.lift}, ${WASH.lift * 0.86}, ${WASH.lift * 0.62});`);
+  };
+  m.customProgramCacheKey = () => 'pastel';
+  return m;
+}
 
 function toonify(root, opts = {}) {
   root.traverse(o => {
@@ -124,12 +148,12 @@ function toonify(root, opts = {}) {
     const out = mats.map(m => {
       const map = (opts.map || (m && m.map)) || null;
       if (map) { map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = IS_MOBILE ? 2 : 4; }
-      return new THREE.MeshToonMaterial({
+      return pastel(new THREE.MeshToonMaterial({
         name: (m && m.name) || '',
         color: 0xffffff,
         map,
         gradientMap: GRAD
-      });
+      }));
     });
     o.material = out.length === 1 ? out[0] : out;
     o.castShadow = opts.castShadow !== false;
@@ -138,7 +162,8 @@ function toonify(root, opts = {}) {
 }
 
 /* ---------- outline (inverted hull) ---------- */
-const OUTLINE_COLOR = 0x1b2027;
+const OUTLINE = /(\?|&)outline/.test(location.search);
+const OUTLINE_COLOR = 0x3a3630;
 const outlineMats = new Map();
 function outlineMaterial(thickness) {
   const key = Math.max(0.0004, thickness).toFixed(5);
@@ -156,6 +181,7 @@ function outlineMaterial(thickness) {
 
 const vScale = new THREE.Vector3();
 function addOutline(root, world = 0.03) {
+  if (!OUTLINE) return;
   const list = [];
   root.traverse(o => { if (o.isMesh && !o.userData.__outline) list.push(o); });
   for (const o of list) {
@@ -171,7 +197,7 @@ function addOutline(root, world = 0.03) {
 }
 
 /* ---------- 顶点色道具（车 / 树共享一个卡通材质） ---------- */
-const VC_MAT = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: GRAD });
+const VC_MAT = pastel(new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: GRAD }));
 function paint(geo, hex) {
   const c = new THREE.Color(hex), n = geo.attributes.position.count;
   const a = new Float32Array(n * 3);
