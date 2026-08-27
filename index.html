@@ -92,6 +92,11 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
        display:flex; align-items:center; justify-content:center; box-shadow:0 3px 8px rgba(0,0,0,.3); }
 .gas:active { background:rgba(255,140,20,.95); }
 .gas.img:active, .brake.img:active { transform:scale(.93); }
+#btnRide { position:absolute; right:16px; bottom:184px; width:56px; height:56px; border-radius:50%;
+           background:rgba(255,255,255,.92); border:3px solid #ff9d2e; color:#c25b00; font-size:14px;
+           font-weight:800; display:flex; align-items:center; justify-content:center;
+           box-shadow:0 3px 8px rgba(0,0,0,.3); }
+#btnRide:active { transform:scale(.93); }
 .brake { position:absolute; right:100px; bottom:98px; width:56px; height:56px; border-radius:50%;
          background:rgba(60,70,80,.7); border:3px solid #fff; color:#fff; font-size:12px; font-weight:800;
          display:flex; align-items:center; justify-content:center; }
@@ -151,6 +156,7 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
   .taskbar, #mini { top:78px; }
   .compass { top:180px; }
   .bbtn img { height:74px; }
+  #btnRide { width:50px; height:50px; font-size:13px; bottom:174px; }
   .gas.img { width:74px; height:74px; }
   .brake.img { width:56px; height:56px; }
 }
@@ -200,6 +206,7 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
          text-shadow:0 1px 2px #000;white-space:pre-wrap;"></div>
 
     <div class="stick" id="stick"><i id="knob"></i></div>
+    <div id="btnRide">下车</div>
     <div class="brake" id="brake">刹车<img src="./assets/ui/btn-brake.png" alt=""
          onload="this.parentNode.classList.add('img')" onerror="this.remove()"></div>
     <div class="gas" id="gas">油门<img src="./assets/ui/btn-gas.png" alt=""

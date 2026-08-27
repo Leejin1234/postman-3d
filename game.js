@@ -19,6 +19,13 @@ const CFG = {
   drag: 0.8,
   steer: 2.3,
   reachRadius: 4.2,
+  walkSpeed: 1.9,
+  runSpeed: 5.4,
+  jumpVel: 4.8,
+  gravity: 15,
+  footTurn: 10,
+  footRadius: 0.42,
+  mountRange: 3.4,
   shadowSize: IS_MOBILE ? 1024 : 2048,
   shadowSpan: IS_MOBILE ? 38 : 52,
   fog: IS_MOBILE ? [90, 230] : [120, 320],
@@ -32,7 +39,8 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const state = {
   coin: 0, parcel: 0, lv: 1, xp: 0, xpMax: 100,
   phase: 'pickup', target: null, mailboxes: [],
-  speed: 0, heading: 0, tris: 0
+  speed: 0, heading: 0, tris: 0,
+  onBike: true, camYaw: 0
 };
 
 /* ---------- renderer / scene ---------- */
@@ -184,7 +192,7 @@ const vScale = new THREE.Vector3();
 function addOutline(root, world = 0.03) {
   if (!OUTLINE) return;
   const list = [];
-  root.traverse(o => { if (o.isMesh && !o.userData.__outline) list.push(o); });
+  root.traverse(o => { if (o.isMesh && !o.isSkinnedMesh && !o.userData.__outline) list.push(o); });
   for (const o of list) {
     o.getWorldScale(vScale);
     const avg = (Math.abs(vScale.x) + Math.abs(vScale.y) + Math.abs(vScale.z)) / 3 || 1;
@@ -377,7 +385,8 @@ function initTraffic(n) {
   }
 }
 function updateTraffic(dt) {
-  const px = player.position.x, pz = player.position.z;
+  const fp = focusPos();
+  const px = fp.x, pz = fp.z;
   for (const c of traffic) {
     if (c.mesh.position.y < -10) continue;
     const fx = Math.sin(c.h), fz = Math.cos(c.h);
@@ -404,22 +413,23 @@ function updateTraffic(dt) {
       c.x = nx; c.z = nz; c.stuck = 0;
     } else if (c.v > 0.05) {
       c.v = 0; c.stuck += dt;
-      if (c.stuck > 2.5) { spawnCar(c, player.position); continue; }
+      if (c.stuck > 2.5) { spawnCar(c, fp); continue; }
     }
     c.mesh.position.set(c.x, 0, c.z);
     const dy = Math.atan2(Math.sin(c.h - c.mesh.rotation.y), Math.cos(c.h - c.mesh.rotation.y));
     c.mesh.rotation.y += dy * Math.min(1, dt * 7);
     const ddx = px - c.x, ddz = pz - c.z, dd = Math.hypot(ddx, ddz);
     if (dd < 2.1 && dd > 0.01) {
-      player.position.x += ddx / dd * (2.1 - dd);
-      player.position.z += ddz / dd * (2.1 - dd);
-      state.speed *= 0.3;
+      const target = state.onBike ? player.position : walker.position;
+      target.x += ddx / dd * (2.1 - dd);
+      target.z += ddz / dd * (2.1 - dd);
+      if (state.onBike) state.speed *= 0.3; else foot.speed *= 0.3;
       if (!state.bumpT || clock.elapsedTime - state.bumpT > 2) {
         state.bumpT = clock.elapsedTime;
         toast('小心车辆！');
       }
     }
-    if (dd > 115) spawnCar(c, player.position);
+    if (dd > 115) spawnCar(c, fp);
   }
 }
 
@@ -853,52 +863,103 @@ const bikeHolder = new THREE.Group();
 const riderHolder = new THREE.Group();
 rig.add(bikeHolder, riderHolder);
 
-/* T-pose 静态网格 → 骑坐姿势（顶点分区旋转） */
-function poseRider(geo, H) {
-  const pos = geo.attributes.position;
-  const hipY = 0.50 * H, kneeY = 0.28 * H, shoulderY = 0.80 * H, armZ = 0.075 * H;
-  const down = new THREE.Vector3(0, -1, 0);
-  const up = new THREE.Vector3(0, 1, 0);
-  const qThigh = new THREE.Quaternion().setFromUnitVectors(down, new THREE.Vector3(0.84, -0.54, 0).normalize());
-  const qShin = new THREE.Quaternion().setFromUnitVectors(down, new THREE.Vector3(-0.16, -0.99, 0).normalize());
-  const qTorso = new THREE.Quaternion().setFromUnitVectors(up, new THREE.Vector3(0.26, 0.97, 0).normalize());
-  const qArmP = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0.9, -0.3, 0.31).normalize());
-  const qArmN = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), new THREE.Vector3(0.9, -0.3, -0.31).normalize());
+/* 下车后在世界里独立行走的角色容器 */
+const walker = new THREE.Group();
+walker.visible = false;
+scene.add(walker);
+const walkerRig = new THREE.Group();
+walkerRig.rotation.y = -Math.PI / 2;
+walker.add(walkerRig);
 
-  const hip = new THREE.Vector3(0, hipY, 0);
-  const knee = new THREE.Vector3(0, kneeY, 0);
-  const kneeNew = knee.clone().sub(hip).applyQuaternion(qThigh).add(hip);
+const foot = { speed: 0, vy: 0, air: false, heading: 0 };
 
-  const n = pos.count;
-  const region = new Uint8Array(n);
-  const v = new THREE.Vector3();
-  for (let i = 0; i < n; i++) {
-    v.fromBufferAttribute(pos, i);
-    if (v.y < kneeY) region[i] = 2;
-    else if (v.y < hipY) region[i] = 1;
-    else if (v.y > 0.63 * H && Math.abs(v.z) > armZ) region[i] = v.z > 0 ? 3 : 4;
-    else region[i] = 0;
-  }
-  const sh = new THREE.Vector3();
-  for (let i = 0; i < n; i++) {
-    v.fromBufferAttribute(pos, i);
-    const r = region[i];
-    if (r === 1) v.sub(hip).applyQuaternion(qThigh).add(hip);
-    else if (r === 2) v.sub(knee).applyQuaternion(qShin).add(kneeNew);
-    else if (r === 3 || r === 4) {
-      sh.set(0, shoulderY, r === 3 ? armZ : -armZ);
-      v.sub(sh).applyQuaternion(r === 3 ? qArmP : qArmN).add(sh);
-      v.sub(hip).applyQuaternion(qTorso).add(hip);
-    } else if (r === 0 && v.y >= hipY) {
-      v.sub(hip).applyQuaternion(qTorso).add(hip);
-    }
-    pos.setXYZ(i, v.x, v.y, v.z);
-  }
-  pos.needsUpdate = true;
-  geo.computeVertexNormals();
-  geo.computeBoundingBox();
-  return { hipY };
+/* ---------- 骨骼动画 ---------- */
+const boy = { pivot: null, mixer: null, actions: {}, cur: '', seat: new THREE.Vector3() };
+
+/* 同名动画有两套（Armature| 前缀 / 无前缀），挑绑定成功率最高的那条 */
+function pickClip(anims, key, root) {
+  const hits = anims
+    .filter(c => c.name.toLowerCase().endsWith(key))
+    .map(c => {
+      let ok = 0;
+      for (const t of c.tracks) if (root.getObjectByName(t.name.split('.')[0])) ok++;
+      return { c, ok };
+    })
+    .sort((a, b) => b.ok - a.ok);
+  return hits.length ? hits[0].c : null;
 }
+
+/* 动画自带位移会让角色飘走，去掉根节点平移，改由代码推进 */
+function stripRootMotion(clip) {
+  const roots = ['Armature', 'Root'];
+  clip.tracks = clip.tracks.filter(t => {
+    const [node, prop] = t.name.split('.');
+    return !(prop === 'position' && roots.includes(node));
+  });
+  return clip;
+}
+
+function playAnim(name, { fade = 0.18, once = false, speed = 1 } = {}) {
+  const a = boy.actions[name];
+  if (!a) return null;
+  a.timeScale = speed;
+  if (boy.cur === name) return a;
+  const prev = boy.actions[boy.cur];
+  a.reset();
+  if (once) { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; }
+  else a.setLoop(THREE.LoopRepeat, Infinity);
+  a.fadeIn(fade).play();
+  if (prev && prev !== a) prev.fadeOut(fade);
+  boy.cur = name;
+  return a;
+}
+
+function setRideBtn() {
+  const b = $('btnRide');
+  if (b) b.textContent = state.onBike ? '下车' : '上车';
+}
+
+function dismount() {
+  if (!state.onBike || !boy.pivot) return;
+  if (Math.abs(state.speed) > 3.2) { toast('停稳后才能下车'); return; }
+  state.speed = 0;
+  state.onBike = false;
+  walkerRig.add(boy.pivot);
+  boy.pivot.position.set(0, 0, 0);
+
+  const side = new THREE.Vector3(Math.cos(state.heading), 0, -Math.sin(state.heading));
+  let p = player.position.clone().addScaledVector(side, 1.15);
+  if (blockedAt(p.x, p.z, CFG.footRadius)) p = player.position.clone().addScaledVector(side, -1.15);
+  if (blockedAt(p.x, p.z, CFG.footRadius)) p = player.position.clone();
+  walker.position.set(p.x, Math.max(0, heightAt(p.x, p.z)), p.z);
+  foot.heading = state.heading;
+  foot.speed = 0; foot.vy = 0; foot.air = false;
+  walker.rotation.y = foot.heading;
+  walker.visible = true;
+  boy.cur = '';
+  playAnim('idle', { fade: 0.12 });
+  setRideBtn();
+  toast('下车 · 摇杆走，油门跑，刹车跳');
+}
+
+function mount() {
+  if (state.onBike || !boy.pivot) return;
+  if (walker.position.distanceTo(player.position) > CFG.mountRange) { toast('走到电动车旁再上车'); return; }
+  state.onBike = true;
+  walker.visible = false;
+  riderHolder.add(boy.pivot);
+  boy.pivot.position.copy(boy.seat);
+  boy.cur = '';
+  playAnim('sit', { fade: 0.15 });
+  setRideBtn();
+  toast('上车 · 油门加速，刹车减速');
+}
+
+function toggleRide() { state.onBike ? dismount() : mount(); }
+
+function focusPos() { return state.onBike ? player.position : walker.position; }
+function focusHeading() { return state.onBike ? state.heading : foot.heading; }
+function focusSpeed() { return state.onBike ? state.speed : foot.speed; }
 
 /* ---------- HUD ---------- */
 let toastTimer = 0;
@@ -936,7 +997,7 @@ function nextTask() {
     let mb = state.mailboxes[Math.floor(Math.random() * state.mailboxes.length)];
     for (let i = 0; i < 6; i++) {
       const c = state.mailboxes[Math.floor(Math.random() * state.mailboxes.length)];
-      if (c.position.distanceTo(player.position) > 25) { mb = c; break; }
+      if (c.position.distanceTo(focusPos()) > 25) { mb = c; break; }
     }
     state.target = mb.position.clone();
     pickupMarker.position.copy(state.target);
@@ -946,7 +1007,7 @@ function nextTask() {
     $('taskDesc').textContent = '去红色邮箱领取下一封信';
     $('taskIcon').textContent = '📮';
   } else {
-    const p = findRoadPoint(2.5, player.position, 60);
+    const p = findRoadPoint(2.5, focusPos(), 60);
     state.target = p;
     dropMarker.position.copy(p);
     dropMarker.visible = true;
@@ -981,7 +1042,9 @@ const keys = {};
 addEventListener('keydown', e => { keys[e.code] = true; });
 addEventListener('keyup', e => { keys[e.code] = false; });
 
-$('hint').textContent = IS_MOBILE ? '左摇杆转向 · 右侧油门/刹车' : 'W/S 油门刹车 · A/D 转向 · 空格手刹';
+$('hint').textContent = IS_MOBILE
+  ? '摇杆转向 · 油门/刹车 · 「下车」步行'
+  : 'W/S 油门刹车 · A/D 转向 · F 上下车 · 步行时 Shift 跑 / 空格跳';
 addEventListener('touchmove', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
 addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('contextmenu', e => e.preventDefault());
@@ -1013,7 +1076,7 @@ stick.addEventListener('mousedown', e => { stickId = 'm'; stickMove(e); });
 addEventListener('mousemove', e => { if (stickId === 'm') stickMove(e); });
 addEventListener('mouseup', () => { if (stickId === 'm') stickEnd(); });
 
-let gasOn = false, brakeOn = false;
+let gasOn = false, brakeOn = false, jumpQueued = false;
 function hold(el, set) {
   const on = e => { set(true); e.preventDefault(); };
   const off = () => set(false);
@@ -1025,7 +1088,15 @@ function hold(el, set) {
   el.addEventListener('mouseleave', off);
 }
 hold($('gas'), v => gasOn = v);
-hold($('brake'), v => brakeOn = v);
+hold($('brake'), v => {
+  if (v && !brakeOn && !state.onBike) jumpQueued = true;   // 下车时刹车键 = 跳
+  brakeOn = v;
+});
+if ($('btnRide')) $('btnRide').addEventListener('click', toggleRide);
+addEventListener('keydown', e => {
+  if (e.code === 'KeyF') toggleRide();
+  if (e.code === 'Space' && !state.onBike) jumpQueued = true;
+});
 
 const PANELS = {
   bag: ['🎒 背包', [['✉️', '平信'], ['📦', '包裹'], ['🥤', '汽水'], ['🔧', '扳手'], ['🗺️', '地图'], ['🎫', '优惠券']]],
@@ -1069,17 +1140,18 @@ function buildMiniImage() {
 }
 function drawMini() {
   const S = mini.width, R = 62;
+  const fp = focusPos();
   mg.fillStyle = '#1a222a';
   mg.fillRect(0, 0, S, S);
   if (HM.img) {
     const k = S / (R * 2);
-    const sx = (player.position.x - R - HM.minX) / HM.cell;
-    const sz = (player.position.z - R - HM.minZ) / HM.cell;
+    const sx = (fp.x - R - HM.minX) / HM.cell;
+    const sz = (fp.z - R - HM.minZ) / HM.cell;
     const sw = (R * 2) / HM.cell;
     mg.imageSmoothingEnabled = false;
     mg.drawImage(HM.img, sx, sz, sw, sw, 0, 0, S, S);
     if (state.target) {
-      const dx = state.target.x - player.position.x, dz = state.target.z - player.position.z;
+      const dx = state.target.x - fp.x, dz = state.target.z - fp.z;
       const d = Math.hypot(dx, dz);
       const c = d > R ? R / d : 1;
       mg.fillStyle = state.phase === 'pickup' ? '#ff5a4a' : '#38c76a';
@@ -1087,17 +1159,26 @@ function drawMini() {
       mg.arc((dx * c + R) * k, (dz * c + R) * k, 7, 0, 7);
       mg.fill();
     }
+    if (!state.onBike) {
+      const dx = (player.position.x - fp.x) * k, dz = (player.position.z - fp.z) * k;
+      if (Math.abs(dx) < S / 2 - 4 && Math.abs(dz) < S / 2 - 4) {
+        mg.fillStyle = '#ff9d2e';
+        mg.beginPath();
+        mg.arc(S / 2 + dx, S / 2 + dz, 4, 0, 7);
+        mg.fill();
+      }
+    }
     mg.fillStyle = '#10161c';
     for (const car of traffic) {
       if (car.mesh.position.y < -10) continue;
-      const dx = (car.x - player.position.x) * k, dz = (car.z - player.position.z) * k;
+      const dx = (car.x - fp.x) * k, dz = (car.z - fp.z) * k;
       if (Math.abs(dx) > S / 2 - 3 || Math.abs(dz) > S / 2 - 3) continue;
       mg.fillRect(S / 2 + dx - 2, S / 2 + dz - 2, 4, 4);
     }
   }
   mg.save();
   mg.translate(S / 2, S / 2);
-  mg.rotate(-state.heading);
+  mg.rotate(-focusHeading());
   mg.fillStyle = '#ffd24a';
   mg.beginPath();
   mg.moveTo(0, -10); mg.lineTo(7, 9); mg.lineTo(0, 4); mg.lineTo(-7, 9);
@@ -1162,35 +1243,123 @@ function updatePlayer(dt) {
   rig.rotation.z += (lean - rig.rotation.z) * Math.min(1, dt * 8);
 }
 
+/* ---------- 步行 / 跑 / 跳 ---------- */
+const camF = new THREE.Vector3(), camR = new THREE.Vector3(), moveDir = new THREE.Vector3();
+function updateFoot(dt) {
+  camera.getWorldDirection(camF);
+  camF.y = 0;
+  if (camF.lengthSq() < 1e-6) camF.set(0, 0, 1);
+  camF.normalize();
+  camR.set(-camF.z, 0, camF.x);          // 屏幕右方向
+
+  moveDir.set(0, 0, 0);
+  moveDir.addScaledVector(camF, -stickVec.y).addScaledVector(camR, stickVec.x);
+  if (keys.KeyW || keys.ArrowUp) moveDir.add(camF);
+  if (keys.KeyS || keys.ArrowDown) moveDir.sub(camF);
+  if (keys.KeyD || keys.ArrowRight) moveDir.add(camR);
+  if (keys.KeyA || keys.ArrowLeft) moveDir.sub(camR);
+  if (AUTO) moveDir.add(camF);
+
+  const running = gasOn || keys.ShiftLeft || keys.ShiftRight;
+  let mag = Math.min(1, moveDir.length());
+  if (mag > 0.08) {
+    moveDir.normalize();
+    const target = (running ? CFG.runSpeed : CFG.walkSpeed) * mag;
+    foot.speed += (target - foot.speed) * Math.min(1, dt * 9);
+    const want = Math.atan2(moveDir.x, moveDir.z);
+    let dh = want - foot.heading;
+    while (dh > Math.PI) dh -= Math.PI * 2;
+    while (dh < -Math.PI) dh += Math.PI * 2;
+    foot.heading += dh * Math.min(1, dt * CFG.footTurn);
+  } else {
+    mag = 0;
+    foot.speed += (0 - foot.speed) * Math.min(1, dt * 12);
+    if (foot.speed < 0.05) foot.speed = 0;
+  }
+  walker.rotation.y = foot.heading;
+
+  if (jumpQueued) {
+    jumpQueued = false;
+    if (!foot.air) {
+      foot.air = true;
+      foot.vy = CFG.jumpVel;
+      boy.cur = '';
+      playAnim('jump', { fade: 0.06, once: true, speed: 1.35 });
+    }
+  }
+
+  const fx = Math.sin(foot.heading), fz = Math.cos(foot.heading);
+  const step = foot.speed * dt;
+  const x = walker.position.x, z = walker.position.z;
+  let nx = x + fx * step, nz = z + fz * step;
+  if (blockedAt(nx, nz, CFG.footRadius)) {
+    nx = x + fx * step; nz = z;
+    if (blockedAt(nx, nz, CFG.footRadius)) {
+      nx = x; nz = z + fz * step;
+      if (blockedAt(nx, nz, CFG.footRadius)) { nx = x; nz = z; foot.speed *= 0.3; }
+    }
+  }
+  walker.position.x = nx;
+  walker.position.z = nz;
+
+  const gh = heightAt(nx, nz);
+  const ground = Math.abs(gh) < STEP + 0.6 ? gh : 0;
+  if (foot.air) {
+    foot.vy -= CFG.gravity * dt;
+    walker.position.y += foot.vy * dt;
+    if (walker.position.y <= ground && foot.vy < 0) {
+      walker.position.y = ground;
+      foot.air = false;
+      foot.vy = 0;
+      boy.cur = '';
+    }
+  } else {
+    walker.position.y += (ground - walker.position.y) * Math.min(1, dt * 10);
+  }
+
+  if (!foot.air) {
+    if (foot.speed > CFG.walkSpeed * 1.15) playAnim('run', { fade: 0.16, speed: clamp(foot.speed / CFG.runSpeed, 0.65, 1.5) });
+    else if (foot.speed > 0.2) playAnim('walk', { fade: 0.16, speed: clamp(foot.speed / CFG.walkSpeed, 0.5, 1.6) });
+    else playAnim('idle', { fade: 0.2 });
+  }
+}
+
 const camGoal = new THREE.Vector3(), lookGoal = new THREE.Vector3();
+const camDir = new THREE.Vector3();
 const INSPECT = /(\?|&)insp/.test(location.search);
-function cameraDistance(want) {
-  const px = player.position.x, pz = player.position.z;
+function cameraDistance(want, p) {
   for (let d = 3; d <= want; d += 0.6) {
-    const cy = player.position.y + 2.6 + d * 0.22;
-    if (heightAt(px - forward.x * d, pz - forward.z * d) > cy - 0.3) return Math.max(5.5, d - 0.8);
+    const cy = p.y + 2.6 + d * 0.22;
+    if (heightAt(p.x - camDir.x * d, p.z - camDir.z * d) > cy - 0.3) return Math.max(5.5, d - 0.8);
   }
   return want;
 }
 function updateCamera(dt) {
+  const p = focusPos();
   if (INSPECT) {
-    camera.position.set(player.position.x + 3.4, player.position.y + 1.2, player.position.z + 0.6);
-    camera.lookAt(player.position.x, player.position.y + 0.9, player.position.z);
+    camera.position.set(p.x + 3.4, p.y + 1.2, p.z + 0.6);
+    camera.lookAt(p.x, p.y + 0.9, p.z);
     return;
   }
-  const want = 9.6 + Math.abs(state.speed) * 0.18;
-  const back = cameraDistance(want);
-  camGoal.set(
-    player.position.x - forward.x * back,
-    player.position.y + 2.6 + back * 0.22,
-    player.position.z - forward.z * back
-  );
-  lookGoal.set(
-    player.position.x + forward.x * 4.2,
-    player.position.y + 1.3,
-    player.position.z + forward.z * 4.2
-  );
-  const k = Math.min(1, dt * 6);
+  /* 骑车时机身朝向即镜头朝向；步行时镜头慢慢跟上，避免和「相机相对」操作互相带偏 */
+  if (state.onBike) {
+    state.camYaw = state.heading;
+    camDir.copy(forward);
+  } else {
+    let dh = foot.heading - state.camYaw;
+    while (dh > Math.PI) dh -= Math.PI * 2;
+    while (dh < -Math.PI) dh += Math.PI * 2;
+    const rate = foot.speed > 0.3 ? 1.8 : 0.5;
+    state.camYaw += dh * Math.min(1, dt * rate);
+    camDir.set(Math.sin(state.camYaw), 0, Math.cos(state.camYaw));
+  }
+
+  const base = state.onBike ? 9.6 + Math.abs(state.speed) * 0.18 : 5.6 + foot.speed * 0.2;
+  const back = cameraDistance(base, p);
+  const high = state.onBike ? 2.6 : 1.9;
+  camGoal.set(p.x - camDir.x * back, p.y + high + back * 0.22, p.z - camDir.z * back);
+  lookGoal.set(p.x + camDir.x * 4.2, p.y + (state.onBike ? 1.3 : 1.1), p.z + camDir.z * 4.2);
+  const k = Math.min(1, dt * (state.onBike ? 6 : 7));
   camera.position.lerp(camGoal, k);
   camera.lookAt(lookGoal);
 }
@@ -1202,11 +1371,12 @@ function updateMarkers(dt, time) {
     m.userData.icon.position.y = 3.2 + Math.sin(time * 2.2) * 0.22;
   });
   if (!state.target) return;
-  const d = Math.hypot(state.target.x - player.position.x, state.target.z - player.position.z);
+  const p = focusPos();
+  const d = Math.hypot(state.target.x - p.x, state.target.z - p.z);
   $('dist').textContent = Math.round(d) + ' m';
-  const ang = Math.atan2(state.target.x - player.position.x, state.target.z - player.position.z) - state.heading;
+  const ang = Math.atan2(state.target.x - p.x, state.target.z - p.z) - focusHeading();
   $('arw').style.transform = `rotate(${(-ang * 180 / Math.PI)}deg)`;
-  if (d < CFG.reachRadius && Math.abs(state.speed) < 6) reachTarget();
+  if (d < CFG.reachRadius && Math.abs(focusSpeed()) < 6) reachTarget();
 }
 
 /* ---------- 主循环 ---------- */
@@ -1223,26 +1393,29 @@ function loop() {
   requestAnimationFrame(loop);
   const dt = Math.min(clock.getDelta(), 0.05);
   const time = clock.elapsedTime;
-  updatePlayer(dt);
+  if (state.onBike) updatePlayer(dt);
+  else updateFoot(dt);
+  if (boy.mixer) boy.mixer.update(dt);
   updateTraffic(dt);
   updateCamera(dt);
   updateMarkers(dt, time);
 
-  sun.position.set(player.position.x + 46, 86, player.position.z + 38);
-  sun.target.position.copy(player.position);
+  const fp = focusPos();
+  sun.position.set(fp.x + 46, 86, fp.z + 38);
+  sun.target.position.copy(fp);
   sky.position.set(camera.position.x, 0, camera.position.z);
   for (const c of clouds) {
     c.sp.position.x += c.spd * dt;
     if (c.sp.position.x > camera.position.x + 400) c.sp.position.x = camera.position.x - 400;
   }
 
-  $('spd').textContent = Math.round(Math.abs(state.speed) * 3.6);
+  $('spd').textContent = Math.round(Math.abs(focusSpeed()) * 3.6);
   if (DEBUG && time - (state.dbgT || 0) > 0.5) {
     state.dbgT = time;
     const r = renderer.info.render;
     $('dbg').textContent = `draw=${r.calls} tri=${(r.triangles / 1000) | 0}k fps=${(1 / Math.max(dt, 0.001)) | 0}\n` +
-      `pos=${player.position.x.toFixed(0)},${player.position.z.toFixed(0)} y=${player.position.y.toFixed(2)}` +
-      ` k=${(state.scale || 1).toFixed(2)} 街宽=${(state.streetW || 0).toFixed(1)}m`;
+      `pos=${fp.x.toFixed(0)},${fp.z.toFixed(0)} y=${fp.y.toFixed(2)}` +
+      ` ${state.onBike ? '骑车' : '步行 ' + boy.cur} 街宽=${(state.streetW || 0).toFixed(1)}m`;
   }
   drawMini();
   renderer.render(scene, camera);
@@ -1285,17 +1458,47 @@ async function boot() {
   addOutline(bikeHolder, 0.022);
 
   setProgress(0.85, '加载骑手…');
-  const boyRoot = await loadOne('./assets/boy2.fbx');
+  const boyRoot = await loadOne('./assets/the-boy.fbx');
   normalize(boyRoot, { height: CFG.riderHeight });
-  toonify(boyRoot, { map: await loadTex('./assets/boy2_basecolor.jpg') });
-  const boyFlat = flatten(boyRoot);
-  const pose = poseRider(boyFlat.geometry, CFG.riderHeight);
-  const rider = new THREE.Mesh(boyFlat.geometry, boyFlat.material);
-  rider.castShadow = true;
-  const seatY = bikeSize.y * 0.60, seatX = -0.10;
-  rider.position.set(seatX, seatY - pose.hipY, 0);
-  riderHolder.add(rider);
-  addOutline(riderHolder, 0.02);
+  toonify(boyRoot, { map: await loadTex('./assets/the-boy_basecolor.jpg') });
+  boyRoot.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+
+  boy.pivot = new THREE.Group();
+  boy.pivot.add(boyRoot);
+  boy.mixer = new THREE.AnimationMixer(boyRoot);
+
+  const clipOf = k => pickClip(boyRoot.animations, k, boyRoot);
+  const sitClip = clipOf('sit');
+  const walkClip = clipOf('walk');
+  const runClip = clipOf('run');
+  const jumpClip = clipOf('jump');
+  if (walkClip) stripRootMotion(walkClip);
+  if (runClip) stripRootMotion(runClip);
+  if (jumpClip) stripRootMotion(jumpClip);
+  if (sitClip) boy.actions.sit = boy.mixer.clipAction(sitClip);
+  if (walkClip) {
+    boy.actions.walk = boy.mixer.clipAction(walkClip);
+    /* 没有站立待机动画：用行走片段的第一帧当站姿 */
+    const idle = boy.mixer.clipAction(walkClip.clone());
+    idle.timeScale = 0;
+    boy.actions.idle = idle;
+  }
+  if (runClip) boy.actions.run = boy.mixer.clipAction(runClip);
+  if (jumpClip) boy.actions.jump = boy.mixer.clipAction(jumpClip);
+
+  /* 用骑坐姿势下的骨盆高度对齐座垫，避免人浮在车上或陷进车里 */
+  scene.add(boy.pivot);
+  boy.pivot.position.set(0, 0, 0);
+  playAnim('sit', { fade: 0 });
+  boy.mixer.update(0.001);
+  boy.pivot.updateMatrixWorld(true);
+  const pelvis = boyRoot.getObjectByName('Pelvis') || boyRoot.getObjectByName('Hip');
+  const pelvisY = pelvis ? pelvis.getWorldPosition(new THREE.Vector3()).y : CFG.riderHeight * 0.5;
+  boy.seat.set(-0.10, bikeSize.y * 0.60 - pelvisY, 0);
+  scene.remove(boy.pivot);
+  riderHolder.add(boy.pivot);
+  boy.pivot.position.copy(boy.seat);
+  setRideBtn();
 
   setProgress(0.93, '投放邮箱…');
   for (let i = 0; i < 9; i++) {
@@ -1317,9 +1520,11 @@ async function boot() {
   state.heading = spawn.heading;
   player.rotation.y = spawn.heading;
   forward.set(Math.sin(spawn.heading), 0, Math.cos(spawn.heading));
+  state.camYaw = spawn.heading;
   camera.position.set(spawn.pos.x - forward.x * 8, 4.2, spawn.pos.z - forward.z * 8);
   camera.lookAt(spawn.pos.x, 1.2, spawn.pos.z);
   initTraffic(IS_MOBILE ? 7 : 11);
+  if (/(\?|&)foot/.test(location.search)) dismount();
 
   syncHud();
   nextTask();
@@ -1327,6 +1532,41 @@ async function boot() {
   setProgress(1, '出发！');
   $('loading').style.display = 'none';
   renderer.render(scene, camera);
+
+  if (/(\?|&)footest/.test(location.search)) {
+    const boneOf = boyRoot.getObjectByName('R_Thigh');
+    const snap = () => boneOf ? boneOf.quaternion.clone() : null;
+    const res = [];
+    const run2 = (label, secs, opts) => {
+      gasOn = !!opts.run;
+      stickVec.x = 0; stickVec.y = -1;
+      if (opts.stop) { stickVec.y = 0; gasOn = false; }
+      if (opts.jump) jumpQueued = true;
+      const p0 = walker.position.clone();
+      const q0 = snap();
+      let air = 0, maxY = walker.position.y;
+      const n = Math.round(secs * 60);
+      for (let i = 0; i < n; i++) {
+        updateFoot(1 / 60);
+        boy.mixer.update(1 / 60);
+        if (foot.air) air += 1 / 60;
+        maxY = Math.max(maxY, walker.position.y);
+      }
+      const q1 = snap();
+      const bone = q0 && q1 ? (1 - Math.abs(q0.dot(q1))).toFixed(4) : 'n/a';
+      res.push(`${label}: 位移${p0.distanceTo(walker.position).toFixed(2)}m 速度${foot.speed.toFixed(2)}m/s ` +
+        `动作=${boy.cur} 骨骼变化=${bone} 滞空${air.toFixed(2)}s 最高y=${(maxY - p0.y).toFixed(2)}m`);
+    };
+    dismount();
+    run2('走 2s', 2, {});
+    run2('跑 2s', 2, { run: true });
+    run2('跳', 1.6, { jump: true, run: false });
+    run2('站 1s', 1, { stop: true });
+    stickVec.x = stickVec.y = 0; gasOn = false;
+    $('dbg').textContent = res.join('\n');
+    renderer.render(scene, camera);
+    return;
+  }
 
   if (SELFTEST) {
     gasOn = true;
