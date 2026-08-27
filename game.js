@@ -28,7 +28,7 @@ const CFG = {
   mountRange: 3.4,
   shadowSize: IS_MOBILE ? 1024 : 2048,
   shadowSpan: IS_MOBILE ? 38 : 52,
-  fog: IS_MOBILE ? [90, 230] : [120, 320],
+  fog: IS_MOBILE ? [140, 340] : [190, 480],
   maxDpr: IS_MOBILE ? 1.6 : 2
 };
 
@@ -52,7 +52,7 @@ renderer.shadowMap.type = IS_MOBILE ? THREE.PCFShadowMap : THREE.PCFSoftShadowMa
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0xf0e5c8, CFG.fog[0], CFG.fog[1]);
+scene.fog = new THREE.Fog(0xcfe8f7, CFG.fog[0], CFG.fog[1]);
 
 const camera = new THREE.PerspectiveCamera(52, 1, 0.15, IS_MOBILE ? 600 : 900);
 camera.position.set(0, 6, -10);
@@ -62,9 +62,9 @@ const sky = new THREE.Mesh(
   new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
     uniforms: {
-      top: { value: new THREE.Color(0x74b0dc) },
-      mid: { value: new THREE.Color(0xa9d3ea) },
-      bot: { value: new THREE.Color(0xf8eecd) }
+      top: { value: new THREE.Color(0x1f86cf) },
+      mid: { value: new THREE.Color(0x69bbea) },
+      bot: { value: new THREE.Color(0xcfe8f7) }
     },
     vertexShader: `varying float h; void main(){ vec4 w = modelMatrix*vec4(position,1.0);
       h = normalize(position).y; gl_Position = projectionMatrix*viewMatrix*w; }`,
@@ -83,15 +83,16 @@ function cloudTexture() {
   const g = cv.getContext('2d');
   const puff = (x, y, r, warm) => {
     const rg = g.createRadialGradient(x, y, r * 0.15, x, y, r);
-    rg.addColorStop(0, warm ? 'rgba(252,246,232,1)' : 'rgba(255,255,255,1)');
-    rg.addColorStop(0.62, warm ? 'rgba(250,242,224,.95)' : 'rgba(255,255,255,.96)');
+    rg.addColorStop(0, 'rgba(255,255,255,1)');
+    rg.addColorStop(0.80, warm ? 'rgba(233,243,252,1)' : 'rgba(255,255,255,1)');
+    rg.addColorStop(0.92, warm ? 'rgba(226,238,250,.92)' : 'rgba(255,255,255,.95)');
     rg.addColorStop(1, 'rgba(255,255,255,0)');
     g.fillStyle = rg;
     g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
   };
   [[74, 74, 40], [118, 56, 50], [172, 76, 38], [102, 88, 34], [146, 90, 32], [200, 92, 26]]
     .forEach(([x, y, r]) => puff(x, y, r, false));
-  [[96, 100, 30], [150, 104, 26]].forEach(([x, y, r]) => puff(x, y, r, true));
+  [[96, 102, 30], [150, 105, 26]].forEach(([x, y, r]) => puff(x, y, r, true));
   const t = new THREE.CanvasTexture(cv);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
@@ -108,15 +109,15 @@ for (let i = 0; i < (IS_MOBILE ? 12 : 20); i++) {
   clouds.push({ sp, spd: 1.1 + Math.random() * 1.5 });
 }
 
-scene.add(new THREE.HemisphereLight(0xd3e8f4, 0xd9c9a6, 0.6));
-scene.add(new THREE.AmbientLight(0xfff4e4, 0.36));
-const sun = new THREE.DirectionalLight(0xfff1d2, 1.12);
+scene.add(new THREE.HemisphereLight(0xcce6f8, 0xb4b79c, 0.46));
+scene.add(new THREE.AmbientLight(0xffffff, 0.26));
+const sun = new THREE.DirectionalLight(0xfff8e6, 1.3);
 sun.position.set(46, 86, 38);
 sun.castShadow = true;
 sun.shadow.mapSize.set(CFG.shadowSize, CFG.shadowSize);
 sun.shadow.bias = -0.0006;
 sun.shadow.normalBias = 0.04;
-sun.shadow.radius = IS_MOBILE ? 2 : 4;
+sun.shadow.radius = IS_MOBILE ? 1 : 2;
 const sc = sun.shadow.camera;
 sc.left = -CFG.shadowSpan; sc.right = CFG.shadowSpan;
 sc.top = CFG.shadowSpan; sc.bottom = -CFG.shadowSpan;
@@ -124,18 +125,20 @@ sc.near = 1; sc.far = 240;
 scene.add(sun, sun.target);
 
 /* ---------- toon shading ---------- */
-function toonGradient(n) {
+/* 赛璐璐：硬边分色带，NearestFilter 保证明暗交界是一条锐利的线而不是渐变 */
+function toonGradient(stops) {
+  const n = stops.length;
   const d = new Uint8Array(n);
-  for (let i = 0; i < n; i++) d[i] = Math.round(255 * (0.66 + 0.34 * i / (n - 1)));
+  for (let i = 0; i < n; i++) d[i] = Math.round(255 * stops[i]);
   const t = new THREE.DataTexture(d, n, 1, THREE.RedFormat);
-  t.minFilter = t.magFilter = THREE.LinearFilter;
+  t.minFilter = t.magFilter = THREE.NearestFilter;
   t.needsUpdate = true;
   return t;
 }
-const GRAD = toonGradient(3);
+const GRAD = toonGradient([0.70, 0.86, 1.0]);
 
-/* 水粉插画调色：降饱和 + 暖色抬暗部，让贴图从「游戏色」变成「颜料色」 */
-const WASH = { sat: 0.95, lift: 0.04, gain: 1.0 };
+/* 动画赛璐璐调色：提饱和 + 轻微加对比，暗部往冷蓝偏（动画里阴影都是带色的） */
+const WASH = { sat: 1.24, contrast: 1.06, coolShadow: 0.10 };
 function pastel(m) {
   const f = v => v.toFixed(4);
   m.onBeforeCompile = shader => {
@@ -144,9 +147,11 @@ function pastel(m) {
       `#include <map_fragment>
        float wg = dot(diffuseColor.rgb, vec3(0.299,0.587,0.114));
        diffuseColor.rgb = mix(vec3(wg), diffuseColor.rgb, ${f(WASH.sat)});
-       diffuseColor.rgb = diffuseColor.rgb * ${f(WASH.gain)} + vec3(${f(WASH.lift)}, ${f(WASH.lift * 0.86)}, ${f(WASH.lift * 0.62)});`);
+       diffuseColor.rgb = (diffuseColor.rgb - 0.5) * ${f(WASH.contrast)} + 0.5;
+       diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.86,0.94,1.12), ${f(WASH.coolShadow)} * (1.0 - wg));
+       diffuseColor.rgb = clamp(diffuseColor.rgb, 0.0, 1.0);`);
   };
-  m.customProgramCacheKey = () => 'pastel';
+  m.customProgramCacheKey = () => 'cel';
   return m;
 }
 
@@ -170,33 +175,76 @@ function toonify(root, opts = {}) {
   });
 }
 
-/* ---------- outline (inverted hull) ---------- */
-const OUTLINE = /(\?|&)outline/.test(location.search);
-const OUTLINE_COLOR = 0x3a3630;
+/* ---------- 描边（反向壳 / inverted hull） ---------- */
+const OUTLINE = !/(\?|&)noline/.test(location.search);
+const OUTLINE_MUL = parseFloat((location.search.match(/[?&]lw=([\d.]+)/) || [])[1]) || 1;
+const OUTLINE_COLOR = 0x2b2622;
 const outlineMats = new Map();
 function outlineMaterial(thickness) {
-  const key = Math.max(0.0004, thickness).toFixed(5);
+  const w = Math.max(0.0004, thickness);
+  const key = w.toFixed(5);
   if (outlineMats.has(key)) return outlineMats.get(key);
   const m = new THREE.MeshBasicMaterial({ color: OUTLINE_COLOR, side: THREE.BackSide, fog: true });
   m.onBeforeCompile = shader => {
-    shader.vertexShader = shader.vertexShader.replace(
+    shader.vertexShader = 'attribute vec3 aHull;\n' + shader.vertexShader.replace(
       '#include <begin_vertex>',
-      '#include <begin_vertex>\n\ttransformed += objectNormal * ' + Number(key).toFixed(6) + ';');
+      '#include <begin_vertex>\n\ttransformed += aHull * ' + Number(key).toFixed(6) + ';');
   };
   m.customProgramCacheKey = () => 'outline' + key;
   outlineMats.set(key, m);
   return m;
 }
 
+/* 低多边形模型的法线是分面的，直接沿法线挤会让每个面各自飞出去、棱角处露出缝。
+   这里按顶点位置把法线焊接平均一次，存成 aHull 属性，壳体才是连续的。 */
+function bakeHullNormals(geo) {
+  if (geo.attributes.aHull) return;
+  const pos = geo.attributes.position, nrm = geo.attributes.normal;
+  if (!pos || !nrm) return;
+  const n = pos.count;
+  const out = new Float32Array(n * 3);
+  const sums = new Map();
+  const keys = new Array(n);
+  const Q = 1000;
+  for (let i = 0; i < n; i++) {
+    const k = (Math.round(pos.getX(i) * Q) * 73856093 ^ Math.round(pos.getY(i) * Q) * 19349663 ^
+      Math.round(pos.getZ(i) * Q) * 83492791) | 0;
+    keys[i] = k;
+    let s = sums.get(k);
+    if (!s) sums.set(k, s = [0, 0, 0]);
+    s[0] += nrm.getX(i); s[1] += nrm.getY(i); s[2] += nrm.getZ(i);
+  }
+  for (let i = 0; i < n; i++) {
+    const s = sums.get(keys[i]);
+    let x = s[0], y = s[1], z = s[2];
+    const len = Math.hypot(x, y, z);
+    if (len < 1e-6) { x = nrm.getX(i); y = nrm.getY(i); z = nrm.getZ(i); }
+    else { x /= len; y /= len; z /= len; }
+    out[i * 3] = x; out[i * 3 + 1] = y; out[i * 3 + 2] = z;
+  }
+  geo.setAttribute('aHull', new THREE.BufferAttribute(out, 3));
+}
+
 const vScale = new THREE.Vector3();
 function addOutline(root, world = 0.03) {
   if (!OUTLINE) return;
   const list = [];
-  root.traverse(o => { if (o.isMesh && !o.isSkinnedMesh && !o.userData.__outline) list.push(o); });
+  root.traverse(o => { if (o.isMesh && !o.userData.__outline) list.push(o); });
   for (const o of list) {
+    if (!o.geometry || !o.geometry.attributes.normal) continue;
+    bakeHullNormals(o.geometry);
+    if (!o.geometry.attributes.aHull) continue;
     o.getWorldScale(vScale);
     const avg = (Math.abs(vScale.x) + Math.abs(vScale.y) + Math.abs(vScale.z)) / 3 || 1;
-    const shell = new THREE.Mesh(o.geometry, outlineMaterial(world / avg));
+    const mat = outlineMaterial(world * OUTLINE_MUL / avg);
+    let shell;
+    if (o.isSkinnedMesh) {
+      shell = new THREE.SkinnedMesh(o.geometry, mat);
+      shell.bind(o.skeleton, o.bindMatrix);
+      shell.frustumCulled = false;
+    } else {
+      shell = new THREE.Mesh(o.geometry, mat);
+    }
     shell.userData.__outline = true;
     shell.renderOrder = -1;
     shell.castShadow = false;
@@ -478,6 +526,50 @@ function loadTex(url) {
     t.colorSpace = THREE.SRGBColorSpace;
     res(t);
   }, undefined, rej));
+}
+
+/* 反向壳只能描出剪影，窗框 / 面板缝这类「内部结构线」描不出来。
+   这里对贴图本身跑一遍 Sobel，把颜色突变的地方压暗，等于把墨线直接印进贴图。 */
+const INK = !/(\?|&)noink/.test(location.search);
+function inkTexture(tex, { strength = 0.62, threshold = 0.11 } = {}) {
+  if (!INK || !tex || !tex.image) return tex;
+  const img = tex.image;
+  const w = img.width | 0, h = img.height | 0;
+  if (!w || !h) return tex;
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+  const src = ctx.getImageData(0, 0, w, h);
+  const p = src.data;
+  const lum = new Float32Array(w * h);
+  for (let i = 0, n = w * h; i < n; i++) {
+    lum[i] = (p[i * 4] * 0.299 + p[i * 4 + 1] * 0.587 + p[i * 4 + 2] * 0.114) / 255;
+  }
+  const out = ctx.createImageData(w, h);
+  const q = out.data;
+  q.set(p);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const gx = lum[i - w - 1] + 2 * lum[i - 1] + lum[i + w - 1] -
+        lum[i - w + 1] - 2 * lum[i + 1] - lum[i + w + 1];
+      const gy = lum[i - w - 1] + 2 * lum[i - w] + lum[i - w + 1] -
+        lum[i + w - 1] - 2 * lum[i + w] - lum[i + w + 1];
+      const g = Math.hypot(gx, gy);
+      if (g <= threshold) continue;
+      const k = 1 - Math.min(1, (g - threshold) * 2.2) * strength;
+      const o = i * 4;
+      q[o] = p[o] * k; q[o + 1] = p[o + 1] * k; q[o + 2] = p[o + 2] * k;
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = tex.wrapS; t.wrapT = tex.wrapT;
+  t.flipY = tex.flipY;
+  t.needsUpdate = true;
+  return t;
 }
 function setProgress(f, text) {
   $('ldFill').style.width = Math.round(f * 100) + '%';
@@ -1428,7 +1520,7 @@ async function boot() {
   const city = await loadOne('./assets/city-lowpoly.fbx', f => setProgress(0.03 + f * 0.42));
   setProgress(0.48, '布置街道…');
   normalize(city, { span: CFG.citySpan });
-  toonify(city, { map: await loadTex('./assets/City_low_poly_1024.png') });
+  toonify(city, { map: inkTexture(await loadTex('./assets/City_low_poly_1024.png')) });
   const cityRoot = new THREE.Group();
   cityRoot.add(city);
   scene.add(cityRoot);
@@ -1444,24 +1536,30 @@ async function boot() {
 
   setProgress(0.62, '优化渲染批次…');
   const merged = mergeCity(cityRoot);
-  if (merged) scene.add(merged);
+  if (merged) {
+    scene.add(merged);
+    setProgress(0.66, '勾描边线…');
+    await new Promise(r => setTimeout(r, 16));
+    addOutline(merged, 0.105);
+  }
 
   setProgress(0.7, '加载电动车…');
   const bikeRoot = await loadOne('./assets/motuo.fbx');
   const bikeSize = normalize(bikeRoot, { span: CFG.bikeLen });
-  toonify(bikeRoot, { map: await loadTex('./assets/motuo_basecolor.jpg') });
+  toonify(bikeRoot, { map: inkTexture(await loadTex('./assets/motuo_basecolor.jpg'), { threshold: 0.16 }) });
   const bikeFlat = flatten(bikeRoot);
   const bikeMesh = new THREE.Mesh(bikeFlat.geometry, bikeFlat.material);
   bikeMesh.castShadow = true;
   bikeMesh.receiveShadow = true;
   bikeHolder.add(bikeMesh);
-  addOutline(bikeHolder, 0.022);
+  addOutline(bikeHolder, 0.021);
 
   setProgress(0.85, '加载骑手…');
   const boyRoot = await loadOne('./assets/the-boy.fbx');
   normalize(boyRoot, { height: CFG.riderHeight });
-  toonify(boyRoot, { map: await loadTex('./assets/the-boy_basecolor.jpg') });
+  toonify(boyRoot, { map: inkTexture(await loadTex('./assets/the-boy_basecolor.jpg'), { threshold: 0.16 }) });
   boyRoot.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+  addOutline(boyRoot, 0.013);
 
   boy.pivot = new THREE.Group();
   boy.pivot.add(boyRoot);
