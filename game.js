@@ -362,7 +362,7 @@ function placeParked(n) {
   const mesh = new THREE.Mesh(mergeParts(geos), VC_MAT);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
-  addOutline(mesh, 0.02);
+  addOutline(mesh, 0.015);
   scene.add(mesh);
 }
 
@@ -396,7 +396,7 @@ function placeSakura(n) {
   if (!geos.length) return;
   const mesh = new THREE.Mesh(mergeParts(geos), VC_MAT);
   mesh.castShadow = true;
-  addOutline(mesh, 0.03);
+  addOutline(mesh, 0.015);
   scene.add(mesh);
 }
 
@@ -425,7 +425,7 @@ function initTraffic(n) {
     const mesh = new THREE.Mesh(
       carGeo(taxi ? 0xffc63a : CAR_PAINTS[(Math.random() * CAR_PAINTS.length) | 0], taxi), VC_MAT);
     mesh.castShadow = true;
-    addOutline(mesh, 0.02);
+    addOutline(mesh, 0.015);
     scene.add(mesh);
     const c = { mesh, x: 0, z: 0, h: 0, v: 0, stuck: 0 };
     traffic.push(c);
@@ -1540,7 +1540,7 @@ async function boot() {
     scene.add(merged);
     setProgress(0.66, '勾描边线…');
     await new Promise(r => setTimeout(r, 16));
-    addOutline(merged, 0.105);
+    addOutline(merged, 0.015);
   }
 
   setProgress(0.7, '加载电动车…');
