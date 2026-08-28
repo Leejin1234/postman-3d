@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>HUD 尺寸测量</title>
+<style>
+  body { background:#111; color:#dfe8ef; font:13px/1.7 ui-monospace,Consolas,monospace; margin:0; padding:10px; }
+  iframe { width:480px; height:900px; border:0; position:absolute; left:-9999px; }
+  b { color:#ffb347; } .bad { color:#ff8b7d; } .ok { color:#7ddc7d; }
+</style>
+</head>
+<body>
+<div id="out">measuring…</div>
+<iframe id="f" src="./index.html"></iframe>
+<script>
+const out = document.getElementById('out');
+const f = document.getElementById('f');
+function run() {
+  const d = f.contentDocument;
+  const w = f.clientWidth;
+  const rows = [];
+  rows.push('iframe 宽度 = <b>' + w + 'px</b>');
+  const bottom = d.querySelector('.bottom');
+  if (!bottom) { out.innerHTML = '<span class="bad">找不到 .bottom</span>'; return; }
+  const rb = bottom.getBoundingClientRect();
+  rows.push('.bottom  left=' + rb.left.toFixed(1) + ' right=' + rb.right.toFixed(1) +
+    ' width=<b>' + rb.width.toFixed(1) + '</b> 溢出右边=' +
+    (rb.right > w ? '<span class="bad">' + (rb.right - w).toFixed(1) + 'px</span>' : '<span class="ok">否</span>'));
+  d.querySelectorAll('.bbtn').forEach(el => {
+    const r = el.getBoundingClientRect();
+    const img = el.querySelector('img');
+    const ir = img ? img.getBoundingClientRect() : null;
+    rows.push('.bbtn[' + el.dataset.panel + '] class="' + el.className + '" ' +
+      'left=' + r.left.toFixed(1) + ' right=' + r.right.toFixed(1) +
+      ' w=' + r.width.toFixed(1) + ' h=' + r.height.toFixed(1) +
+      (ir ? ' | img w=' + ir.width.toFixed(1) + ' h=' + ir.height.toFixed(1) +
+        ' 自然=' + img.naturalWidth + 'x' + img.naturalHeight : ' | 无图') +
+      (r.right > w ? ' <span class="bad">超出 ' + (r.right - w).toFixed(1) + 'px</span>' : ' <span class="ok">OK</span>'));
+  });
+  ['btnRide', 'gas', 'brake'].forEach(id => {
+    const el = d.getElementById(id);
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    rows.push('#' + id + ' left=' + r.left.toFixed(1) + ' right=' + r.right.toFixed(1) +
+      ' top=' + r.top.toFixed(1) + ' bottom=' + r.bottom.toFixed(1));
+  });
+  out.innerHTML = rows.join('<br>');
+}
+f.addEventListener('load', () => setTimeout(run, 2500));
+</script>
+</body>
+</html>
