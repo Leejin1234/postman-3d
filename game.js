@@ -541,15 +541,23 @@ function withTimeout(promise, ms, fallback) {
 async function openCache() {
   if (assetCache !== undefined) return assetCache;
   assetCache = false;
-  if (!NOCACHE && self.caches) {
-    assetCache = await withTimeout((async () => {
+  if (!self.caches) return assetCache;
+  if (NOCACHE) {
+    /* ?nocache 不只是「这次不用缓存」，而是把旧缓存全删掉 ——
+       万一哪次发布忘了升 CACHE_NAME、导致旧资源一直命中，这就是补救开关 */
+    await withTimeout((async () => {
       const keys = await caches.keys();
-      /* 换了资源就升 CACHE_NAME，这里顺手把旧版本删掉，否则旧文件会一直命中 */
-      await Promise.all(keys.map(k => k.startsWith('postman-assets-') && k !== CACHE_NAME
-        ? caches.delete(k) : null));
-      return await caches.open(CACHE_NAME);
-    })(), 4000, false);
+      await Promise.all(keys.map(k => k.startsWith('postman-assets-') ? caches.delete(k) : null));
+    })(), 6000, null);
+    return assetCache;
   }
+  assetCache = await withTimeout((async () => {
+    const keys = await caches.keys();
+    /* 换了资源就升 CACHE_NAME，这里顺手把旧版本删掉，否则旧文件会一直命中 */
+    await Promise.all(keys.map(k => k.startsWith('postman-assets-') && k !== CACHE_NAME
+      ? caches.delete(k) : null));
+    return await caches.open(CACHE_NAME);
+  })(), 4000, false);
   return assetCache;
 }
 

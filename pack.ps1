@@ -11,6 +11,8 @@ New-Item -ItemType Directory -Path (Join-Path $dist 'assets') | Out-Null
 foreach ($f in @('index.html', 'game.js', 'manifest.webmanifest', 'icon.svg', 'serve.ps1', 'README.txt')) {
   Copy-Item (Join-Path $root $f) $dist
 }
+# 诊断页：手机上加载不出来时，让用户直接打开这个查缓存是否可用
+Copy-Item (Join-Path $root 'cache-test.html') $dist
 Copy-Item (Join-Path $root 'vendor') $dist -Recurse
 
 $assets = @(
