@@ -1,4 +1,4 @@
-# 校验线上站点：.\verify.ps1
+﻿# 校验线上站点：.\verify.ps1
 $base = 'https://leejin1234.github.io/postman-3d/'
 $files = @('index.html', 'game.js', 'README.txt', 'assets/the-boy.fbx', 'assets/city-lowpoly.fbx', 'assets/ui/avatar.png')
 foreach ($f in $files) {

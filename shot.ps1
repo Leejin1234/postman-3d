@@ -1,4 +1,4 @@
-# 截图辅助：.\shot.ps1 -Name cel_insp1 -Query "debug&insp&lw=1"
+﻿# 截图辅助：.\shot.ps1 -Name cel_insp1 -Query "debug&insp&lw=1"
 #           .\shot.ps1 -Name rect1 -Page rect.html -Query "" -W 900 -H 420
 param(
   [Parameter(Mandatory = $true)][string]$Name,

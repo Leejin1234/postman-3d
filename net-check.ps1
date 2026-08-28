@@ -1,4 +1,4 @@
-# 体检线上资源：传输编码、实际下载体积、耗时
+﻿# 体检线上资源：传输编码、实际下载体积、耗时
 $base = 'https://leejin1234.github.io/postman-3d/'
 $files = @('assets/city-lowpoly.fbx', 'assets/the-boy.fbx', 'assets/the-boy_basecolor.jpg', 'vendor/three.module.js', 'game.js')
 foreach ($f in $files) {
