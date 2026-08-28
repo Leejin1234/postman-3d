@@ -514,18 +514,135 @@ function coinPop(gain) {
     [{ transform: 'scale(1)' }, { transform: 'scale(1.15)' }, { transform: 'scale(1)' }], { duration: 320 });
 }
 
-/* ---------- loading ---------- */
+/* ---------- loading ----------
+   城市模型 29.6MB 且 GitHub Pages 不给 .fbx 做 gzip（实测 gzip 只能压到 91%，
+   里面是浮点顶点数据、本来就没冗余），所以省流量这条路走不通，只能：
+     1. 存到 Cache Storage —— 首次下完之后再进游戏是秒开，断网也能玩
+     2. 下载失败退避重试 —— 手机弱网下断一次不至于整局白费              */
 const loader = new FBXLoader();
-const texLoader = new THREE.TextureLoader();
-function loadOne(url, onFrac) {
-  return new Promise((res, rej) => loader.load(url, res,
-    e => { if (onFrac && e.total) onFrac(e.loaded / e.total); }, rej));
+
+const CACHE_NAME = 'postman-assets-v3';
+const NOCACHE = /(\?|&)nocache/.test(location.search);
+let assetCache;
+
+/* caches 只在安全上下文可用（https / localhost）。
+   局域网 http://192.168.x.x 拿不到，此时静默退化成普通下载。 */
+/* Cache API 在某些环境（隐私模式、配额满、WebView 实现有坑）会卡住不返回。
+   所有缓存操作都套一层超时，卡住就当没缓存，绝不能拖死整个加载。 */
+function withTimeout(promise, ms, fallback) {
+  return new Promise(res => {
+    let done = false;
+    const t = setTimeout(() => { if (!done) { done = true; res(fallback); } }, ms);
+    promise.then(v => { if (!done) { done = true; clearTimeout(t); res(v); } },
+      () => { if (!done) { done = true; clearTimeout(t); res(fallback); } });
+  });
 }
+
+async function openCache() {
+  if (assetCache !== undefined) return assetCache;
+  assetCache = false;
+  if (!self.caches) return assetCache;
+  if (NOCACHE) {
+    /* ?nocache 不只是「这次不用缓存」，而是把旧缓存全删掉 ——
+       万一哪次发布忘了升 CACHE_NAME、导致旧资源一直命中，这就是补救开关 */
+    await withTimeout((async () => {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => k.startsWith('postman-assets-') ? caches.delete(k) : null));
+    })(), 6000, null);
+    return assetCache;
+  }
+  assetCache = await withTimeout((async () => {
+    const keys = await caches.keys();
+    /* 换了资源就升 CACHE_NAME，这里顺手把旧版本删掉，否则旧文件会一直命中 */
+    await Promise.all(keys.map(k => k.startsWith('postman-assets-') && k !== CACHE_NAME
+      ? caches.delete(k) : null));
+    return await caches.open(CACHE_NAME);
+  })(), 4000, false);
+  return assetCache;
+}
+
+function fileOf(url) { return url.slice(url.lastIndexOf('/') + 1); }
+
+/* 用 XHR 而不是 fetch 流式读取：fetch 的 ReadableStream 在旧版 iOS Safari 上没有，
+   而 XHR 的 progress 事件到处都能用 */
+function fetchProgress(url, onFrac) {
+  return new Promise((res, rej) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.responseType = 'arraybuffer';
+    xhr.timeout = 90000;
+    xhr.onprogress = e => { if (onFrac && e.lengthComputable) onFrac(e.loaded / e.total); };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) res(xhr.response);
+      else rej(new Error('HTTP ' + xhr.status + ' · ' + fileOf(url)));
+    };
+    xhr.onerror = () => rej(new Error('网络中断 · ' + fileOf(url)));
+    xhr.ontimeout = () => rej(new Error('下载超时 · ' + fileOf(url)));
+    xhr.send();
+  });
+}
+
+async function fetchAsset(url, onFrac) {
+  const c = await openCache();
+  if (c) {
+    const hit = await withTimeout(c.match(url), 6000, null);
+    if (hit) {
+      const buf = await withTimeout(hit.arrayBuffer(), 20000, null);
+      if (buf) {
+        setTip('已从本机缓存读取 · ' + fileOf(url));
+        if (onFrac) onFrac(1);
+        return buf;
+      }
+    }
+  }
+  const buf = await fetchProgress(url, onFrac);
+  if (c) {
+    /* 存缓存不阻塞后续加载：存不进去（配额满 / 隐私模式）也照样能玩 */
+    withTimeout(c.put(url, new Response(buf.slice(0),
+      { headers: { 'Content-Type': 'application/octet-stream' } })), 30000, null);
+  }
+  return buf;
+}
+
+async function withRetry(url, fn, tries = 3) {
+  let last;
+  for (let i = 0; i < tries; i++) {
+    try { return await fn(); } catch (e) {
+      last = e;
+      if (i === tries - 1) break;
+      const wait = 800 * Math.pow(2, i);
+      setTip(fileOf(url) + ' 下载中断，' + (wait / 1000) + ' 秒后重试（第 ' + (i + 1) + '/' + (tries - 1) + ' 次）');
+      await new Promise(r => setTimeout(r, wait));
+    }
+  }
+  throw last;
+}
+
+function loadOne(url, onFrac) {
+  return withRetry(url, async () => {
+    const buf = await fetchAsset(url, onFrac);
+    return loader.parse(buf, url.slice(0, url.lastIndexOf('/') + 1));
+  });
+}
+
 function loadTex(url) {
-  return new Promise((res, rej) => texLoader.load(url, t => {
-    t.colorSpace = THREE.SRGBColorSpace;
-    res(t);
-  }, undefined, rej));
+  return withRetry(url, async () => {
+    const buf = await fetchAsset(url);
+    const blob = new Blob([buf]);
+    const src = URL.createObjectURL(blob);
+    try {
+      const img = await new Promise((res, rej) => {
+        const im = new Image();
+        im.onload = () => res(im);
+        im.onerror = () => rej(new Error('解码失败 · ' + fileOf(url)));
+        im.src = src;
+      });
+      const t = new THREE.Texture(img);
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.needsUpdate = true;
+      return t;
+    } finally { URL.revokeObjectURL(src); }
+  });
 }
 
 /* 反向壳只能描出剪影，窗框 / 面板缝这类「内部结构线」描不出来。
@@ -575,6 +692,7 @@ function setProgress(f, text) {
   $('ldFill').style.width = Math.round(f * 100) + '%';
   if (text) $('loading').firstChild.textContent = text;
 }
+function setTip(text) { const e = $('ldTip'); if (e) e.textContent = text || ''; }
 
 /* 缩放到目标尺寸、XZ 居中、底面贴 y=0 */
 function normalize(obj, { span, height }) {
@@ -1516,6 +1634,13 @@ function loop() {
 /* ---------- 启动 ---------- */
 async function boot() {
   resize();
+  const c = await openCache();
+  if (c) {
+    const cached = await withTimeout(c.match('./assets/city-lowpoly.fbx'), 6000, null);
+    setTip(cached ? '本机已有缓存，马上就好' : '首次加载约 37MB，下载一次后会存到本机，之后秒开');
+  } else {
+    setTip('本机缓存不可用（需要 https 打开），每次都要重新下载');
+  }
   setProgress(0.03, '加载城市模型…');
   const city = await loadOne('./assets/city-lowpoly.fbx', f => setProgress(0.03 + f * 0.42));
   setProgress(0.48, '布置街道…');
@@ -1709,5 +1834,12 @@ function goFullscreen() {
 }
 
 boot().catch(e => {
-  $('ldErr').textContent = '加载失败：\n' + (e && (e.stack || e.message || e));
+  const msg = (e && (e.message || e)) + '';
+  setTip('');
+  $('ldErr').textContent = '加载失败：' + msg +
+    '\n\n多半是网络中断。点下面「重试」会接着用已下载好的缓存继续，不用从头再来。';
+  const btn = $('ldRetry');
+  if (btn) btn.classList.add('on');
 });
+
+if ($('ldRetry')) $('ldRetry').addEventListener('click', () => location.reload());

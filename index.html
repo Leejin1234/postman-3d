@@ -71,16 +71,19 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
 .hint { position:absolute; left:12px; bottom:200px; color:#fff; font-size:11px; opacity:.85; line-height:1.5;
         text-shadow:0 1px 3px rgba(0,0,0,.6); }
 
-.bottom { position:absolute; bottom:12px; left:0; right:0; display:flex; justify-content:center; gap:16px; }
+/* 三个入口改到右侧竖排，落在「下车」按钮上方 */
+.bottom { position:absolute; right:14px; bottom:250px; left:auto; display:flex;
+          flex-direction:column; align-items:center; gap:6px; }
 .bbtn { width:76px; height:58px; border-radius:14px; background:linear-gradient(180deg,#ffd98a,#ffb347);
         border:3px solid #fff; box-shadow:0 4px 0 #d98b20,0 4px 10px rgba(0,0,0,.3);
         display:flex; flex-direction:column; align-items:center; justify-content:center; }
 .bbtn:active { transform:translateY(2px); }
 .bbtn em { font-size:20px; font-style:normal; line-height:1; }
 .bbtn span { font-size:12px; font-weight:800; color:#6b4310; margin-top:2px; }
-.bbtn img { height:84px; display:block; }
+.bbtn img { height:76px; display:block; }
 .bbtn.img { width:auto; height:auto; padding:0; background:none; border:none; box-shadow:none;
             filter:drop-shadow(0 3px 5px rgba(0,0,0,.35)); }
+.bbtn.img:active { transform:scale(.93); }
 .bbtn.img em, .bbtn.img span { display:none; }
 
 .stick { position:absolute; left:16px; bottom:88px; width:104px; height:104px; border-radius:50%;
@@ -128,7 +131,11 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
            align-items:center; justify-content:center; gap:10px; font-size:14px; letter-spacing:1px; z-index:9; }
 #loading .bar { width:60%; height:6px; border-radius:3px; background:rgba(255,255,255,.18); overflow:hidden; }
 #loading .bar i { display:block; height:100%; width:0; background:#ffb347; transition:width .2s; }
+#loading .tip { font-size:11px; letter-spacing:0; color:rgba(255,255,255,.55); text-align:center; padding:0 22px; }
 #loading .err { font-size:12px; line-height:1.6; white-space:pre-wrap; text-align:left; padding:0 22px; color:#ff9b8f; }
+#ldRetry { display:none; margin-top:4px; padding:10px 30px; font-size:15px; font-weight:800; color:#7a3f00;
+           border:none; border-radius:22px; background:#ffb347; letter-spacing:1px; }
+#ldRetry.on { display:block; }
 
 #start { position:absolute; inset:0; z-index:10; display:none; flex-direction:column; align-items:center;
          justify-content:center; gap:16px; background:linear-gradient(180deg,#2f92e0,#7cc4f2 55%,#dcf1ff);
@@ -155,7 +162,8 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
   .gear { width:28px; height:28px; font-size:15px; }
   .taskbar, #mini { top:78px; }
   .compass { top:180px; }
-  .bbtn img { height:74px; }
+  .bbtn img { height:66px; }
+  .bottom { bottom:234px; right:10px; }
   #btnRide { width:50px; height:50px; font-size:13px; bottom:174px; }
   .gas.img { width:74px; height:74px; }
   .brake.img { width:56px; height:56px; }
@@ -228,7 +236,7 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
         <div class="close" id="pClose">关闭</div></div>
     </div>
   </div>
-  <div id="loading">加载小邮差城市…<div class="bar"><i id="ldFill"></i></div><div class="err" id="ldErr"></div></div>
+      <div id="loading">加载小邮差城市…<div class="bar"><i id="ldFill"></i></div><div class="tip" id="ldTip"></div><div class="err" id="ldErr"></div><button id="ldRetry">重 试</button></div>
   <div id="start">
     <h1>小 邮 差</h1>
     <p>骑上电动车穿过小城<br>去红色邮箱取信，再送到绿色光柱</p>
