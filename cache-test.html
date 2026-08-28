@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>缓存诊断</title>
+<style>
+  body { background:#0f1418; color:#dfe8ef; font:13px/1.8 ui-monospace,Consolas,monospace; padding:14px; }
+  b { color:#ffb347; }
+  .ok { color:#7ddc7d; } .bad { color:#ff8b7d; }
+</style>
+</head>
+<body>
+<div id="out">running…</div>
+<script>
+const out = document.getElementById('out');
+const log = (t, cls) => { out.insertAdjacentHTML('beforeend', '<div' + (cls ? ' class="' + cls + '"' : '') + '>' + t + '</div>'); };
+const CACHE_NAME = 'postman-assets-v3';
+const SMALL = './assets/motuo.fbx';
+
+function withTimeout(p, ms, fb) {
+  return new Promise(res => {
+    let done = false;
+    const t = setTimeout(() => { if (!done) { done = true; res(fb); } }, ms);
+    p.then(v => { if (!done) { done = true; clearTimeout(t); res(v); } },
+      () => { if (!done) { done = true; clearTimeout(t); res(fb); } });
+  });
+}
+function xhrBuf(url) {
+  return new Promise((res, rej) => {
+    const x = new XMLHttpRequest();
+    x.open('GET', url, true); x.responseType = 'arraybuffer';
+    x.onload = () => x.status < 300 ? res(x.response) : rej(new Error('HTTP ' + x.status));
+    x.onerror = () => rej(new Error('net'));
+    x.send();
+  });
+}
+
+(async () => {
+  out.textContent = '';
+  log('secureContext = <b>' + self.isSecureContext + '</b>');
+  log('self.caches   = <b>' + (!!self.caches) + '</b>');
+  if (!self.caches) { log('→ 这个地址用不了 Cache API（需要 https 或 localhost）', 'bad'); return; }
+
+  const t0 = performance.now();
+  const c = await withTimeout(caches.open(CACHE_NAME), 4000, false);
+  log('caches.open   = <b>' + (c ? '成功' : '超时/失败') + '</b>  ' + Math.round(performance.now() - t0) + 'ms',
+    c ? 'ok' : 'bad');
+  if (!c) { log('→ Cache API 在本环境不可用，代码会退化成每次重新下载（游戏仍可玩）', 'bad'); return; }
+
+  await c.delete(SMALL);
+  log('--- 第一次：应该走网络 ---');
+  let t = performance.now();
+  const a = await xhrBuf(SMALL);
+  const netMs = Math.round(performance.now() - t);
+  log('下载 ' + (a.byteLength / 1024).toFixed(0) + 'KB 用 <b>' + netMs + 'ms</b>');
+  await withTimeout(c.put(SMALL, new Response(a.slice(0), { headers: { 'Content-Type': 'application/octet-stream' } })), 20000, null);
+  log('写入缓存完成');
+
+  log('--- 第二次：应该命中缓存 ---');
+  t = performance.now();
+  const hit = await withTimeout(c.match(SMALL), 6000, null);
+  if (!hit) { log('match 没命中 → 缓存没生效', 'bad'); return; }
+  const b = await hit.arrayBuffer();
+  const cacheMs = Math.round(performance.now() - t);
+  log('读缓存 ' + (b.byteLength / 1024).toFixed(0) + 'KB 用 <b>' + cacheMs + 'ms</b>');
+  log('字节数一致 = <b>' + (a.byteLength === b.byteLength) + '</b>', a.byteLength === b.byteLength ? 'ok' : 'bad');
+
+  const keys = await caches.keys();
+  log('caches.keys = ' + JSON.stringify(keys));
+  if (navigator.storage && navigator.storage.estimate) {
+    const e = await navigator.storage.estimate();
+    log('已占用 <b>' + (e.usage / 1048576).toFixed(1) + 'MB</b> / 配额 ' + (e.quota / 1048576).toFixed(0) + 'MB');
+  }
+  log('');
+  log('结论：缓存' + (b.byteLength === a.byteLength ? '可用 ✓' : '不可用 ✗'),
+    b.byteLength === a.byteLength ? 'ok' : 'bad');
+})().catch(e => log('异常：' + (e && e.message || e), 'bad'));
+</script>
+</body>
+</html>

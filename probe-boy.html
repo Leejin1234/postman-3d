@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8">
+<title>boy probe</title>
+<style>body{margin:0;background:#111;color:#d6e4f0;font:12px/1.5 Consolas,monospace}
+pre{padding:10px;white-space:pre-wrap}</style>
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three.module.js",
+  "three/addons/loaders/FBXLoader.js": "./vendor/loaders/FBXLoader.js",
+  "three/addons/utils/SkeletonUtils.js": "./vendor/utils/SkeletonUtils.js",
+  "three/addons/utils/BufferGeometryUtils.js": "./vendor/utils/BufferGeometryUtils.js"
+} }
+</script>
+</head><body>
+<pre id="out">loading…</pre>
+<script type="module">
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+const out = document.getElementById('out');
+const log = s => { out.textContent += s + '\n'; };
+
+new FBXLoader().load('./assets/the-boy.fbx', root => {
+  out.textContent = '';
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  log('=== the-boy.fbx ===');
+  log('bbox size  ' + size.x.toFixed(2) + ' x ' + size.y.toFixed(2) + ' x ' + size.z.toFixed(2));
+  log('bbox min.y ' + box.min.y.toFixed(2) + '  max.y ' + box.max.y.toFixed(2));
+  log('root scale ' + JSON.stringify(root.scale));
+
+  let meshes = 0, skinned = 0, tris = 0, bones = 0, mats = [];
+  root.traverse(o => {
+    if (o.isBone) bones++;
+    if (o.isMesh) {
+      meshes++;
+      if (o.isSkinnedMesh) skinned++;
+      const g = o.geometry;
+      tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+      const ms = Array.isArray(o.material) ? o.material : [o.material];
+      ms.forEach(m => mats.push((o.name || '?') + ' / ' + (m.name || '?') + ' / ' + m.type +
+        ' map=' + (m.map ? 'YES' : 'no')));
+      log('mesh "' + o.name + '" skinned=' + !!o.isSkinnedMesh +
+          ' verts=' + g.attributes.position.count +
+          ' skinIdx=' + !!g.attributes.skinIndex +
+          ' uv=' + !!g.attributes.uv);
+    }
+  });
+  log('meshes=' + meshes + ' skinned=' + skinned + ' tris=' + Math.round(tris) + ' bones=' + bones);
+  log('materials:');
+  mats.forEach(m => log('  ' + m));
+
+  log('animations: ' + root.animations.length);
+  root.animations.forEach((c, i) => {
+    log('  #' + i + ' "' + c.name + '"  dur=' + c.duration.toFixed(3) +
+        's tracks=' + c.tracks.length);
+    const names = {};
+    c.tracks.forEach(t => { names[t.name.split('.').pop()] = (names[t.name.split('.').pop()] || 0) + 1; });
+    log('      trackTypes ' + JSON.stringify(names));
+    log('      firstTracks ' + c.tracks.slice(0, 4).map(t => t.name).join(', '));
+  });
+
+  const sk = [];
+  root.traverse(o => { if (o.isSkinnedMesh && o.skeleton) sk.push(o.skeleton); });
+  if (sk.length) {
+    log('skeleton bones (' + sk[0].bones.length + '):');
+    log('  ' + sk[0].bones.map(b => b.name).join(', '));
+  }
+}, undefined, e => { out.textContent = 'LOAD ERROR: ' + e; });
+</script>
+</body></html>

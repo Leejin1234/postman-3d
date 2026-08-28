@@ -1,0 +1,9 @@
+# 全部按二进制存，禁止 git 做行尾（CRLF/LF）转换。
+# 源码里有大量 UTF-8 中文注释，之前被 PowerShell 按 GBK 解码搞成乱码过一次，
+# 这里彻底关掉自动转换，保证 checkout 出来和提交进去的字节完全一致。
+* -text
+
+*.fbx binary
+*.png binary
+*.jpg binary
+*.zip binary

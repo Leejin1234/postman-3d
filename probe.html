@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>模型自检 · postman-3d</title>
+<style>body{background:#111;color:#ddd;font:13px/1.7 Consolas,monospace;padding:16px;white-space:pre-wrap}</style>
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three.module.js",
+  "three/addons/loaders/FBXLoader.js": "./vendor/loaders/FBXLoader.js"
+} }
+</script>
+</head>
+<body>
+<div id="out">读取中…</div>
+<script type="module">
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+const out = document.getElementById('out');
+const log = t => out.textContent += t + '\n';
+const loader = new FBXLoader();
+const files = ['boy2.fbx', 'motuo.fbx', 'city-lowpoly.fbx'];
+
+out.textContent = '';
+for (const f of files) {
+  try {
+    const o = await loader.loadAsync('./assets/' + f);
+    const b = new THREE.Box3().setFromObject(o);
+    const s = b.getSize(new THREE.Vector3());
+    let meshes = 0, tris = 0, mats = new Set(), maps = 0, noUv = 0;
+    o.traverse(n => {
+      if (!n.isMesh) return;
+      meshes++;
+      const g = n.geometry;
+      if (!g.attributes.uv) noUv++;
+      tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+      (Array.isArray(n.material) ? n.material : [n.material]).forEach(m => {
+        if (!m) return;
+        mats.add(m.name || m.type);
+        if (m.map) maps++;
+      });
+    });
+    log(`# ${f}`);
+    log(`  尺寸 x=${s.x.toFixed(2)} y=${s.y.toFixed(2)} z=${s.z.toFixed(2)}`);
+    log(`  mesh=${meshes} 三角=${Math.round(tris)} 材质=${mats.size} 贴图=${maps} 无UV的mesh=${noUv} 动画=${o.animations.length}`);
+    log('  材质名: ' + [...mats].slice(0, 24).join(', '));
+    if (o.animations.length) log('  动画名: ' + o.animations.map(a => a.name).join(', '));
+    log('  顶层子物体: ' + o.children.slice(0, 12).map(c => c.name).join(' | '));
+    if (f === 'city-lowpoly.fbx') {
+      const names = [];
+      o.traverse(n => { if (n.isMesh) names.push(n.name); });
+      log('  mesh名前40: ' + names.slice(0, 40).join(' | '));
+      const big = [];
+      o.traverse(n => {
+        if (!n.isMesh) return;
+        const bb = new THREE.Box3().setFromObject(n);
+        const sz = bb.getSize(new THREE.Vector3());
+        big.push([n.name, sz.x * sz.z, sz.y, bb.min.y]);
+      });
+      big.sort((a, b) => b[1] - a[1]);
+      log('  占地最大10: ' + big.slice(0, 10).map(x => `${x[0]}(面积${x[1] | 0} 高${x[2].toFixed(1)} 底${x[3].toFixed(1)})`).join('\n            '));
+    }
+    if (f === 'boy2.fbx') {
+      const bones = [];
+      o.traverse(n => { if (n.isBone) bones.push(n.name); });
+      log('  骨骼(' + bones.length + '): ' + bones.join(', '));
+      const t = o.getObjectByName('L_Upperarm');
+      log('  L_Upperarm 找到=' + !!t + ' 子=' + (t ? t.children.map(c => c.name).join('/') : '-'));
+      const sk = [];
+      o.traverse(n => { if (n.isSkinnedMesh) sk.push(n.name + ' bones=' + n.skeleton.bones.length); });
+      log('  SkinnedMesh: ' + (sk.join(' | ') || '无'));
+    }
+    log('');
+  } catch (e) {
+    log(`# ${f} 失败: ${e.message}\n`);
+  }
+}
+</script>
+</body>
+</html>

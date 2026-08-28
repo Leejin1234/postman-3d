@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#8fd0f5">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="小邮差">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icon.svg">
+<link rel="icon" href="./icon.svg">
+<title>小邮差 · 3D Demo</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavior:none; touch-action:none;
+            font-family:"PingFang SC","Microsoft YaHei",sans-serif; }
+#stage { position:relative; width:100vw; height:100vh; height:100dvh; max-width:calc(100dvh * 9 / 16);
+         margin:0 auto; overflow:hidden; }
+#stage canvas#gl { display:block; width:100%; height:100%; }
+.hud { position:absolute; inset:0; pointer-events:none; user-select:none; }
+.hud > * { pointer-events:auto; }
+
+.topbar { position:absolute; top:10px; left:10px; right:10px; display:flex; align-items:center; gap:8px; }
+.res, .gear { flex:none; }
+.avatar { position:relative; width:64px; height:64px; border-radius:50%; border:3px solid #fff; overflow:hidden; flex:none;
+          box-shadow:0 2px 6px rgba(0,0,0,.3); background:#c9d6e2; }
+.avatar svg { width:100%; height:100%; display:block; }
+.avatar img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
+.avatar.img { border:none; background:none; }
+.pname { color:#fff; font-size:18px; font-weight:700; text-shadow:0 2px 4px rgba(0,0,0,.5); }
+.lvrow { display:flex; align-items:center; gap:6px; margin-top:4px; }
+.lvbadge { width:24px; height:24px; border-radius:50%; background:#ffb42e; border:2px solid #fff; color:#7a4a00;
+           font-size:13px; font-weight:800; display:flex; align-items:center; justify-content:center; }
+.lvbar { width:112px; height:11px; border-radius:6px; background:rgba(0,0,0,.4); border:1.5px solid #fff; overflow:hidden; }
+.lvbar i { display:block; height:100%; width:0; background:linear-gradient(90deg,#ffd24a,#ff9d2e); transition:width .3s; }
+.lvtxt { color:#fff; font-size:11px; text-shadow:0 1px 3px rgba(0,0,0,.6); }
+.spacer { flex:1; }
+.res { display:flex; align-items:center; gap:4px; background:rgba(255,255,255,.92); border-radius:14px;
+       padding:3px 7px 3px 5px; font-size:12px; font-weight:700; color:#4a3a2a; box-shadow:0 2px 5px rgba(0,0,0,.2); }
+.res .ic { width:18px; height:18px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:10px; }
+.gold { background:#ffcf3f; color:#7a4a00; } .pack { background:#e8483f; color:#fff; }
+.gear { width:32px; height:32px; border-radius:9px; background:rgba(255,255,255,.92); display:flex; align-items:center;
+        justify-content:center; font-size:17px; box-shadow:0 2px 5px rgba(0,0,0,.2); }
+
+.taskbar { position:absolute; top:86px; left:10px; display:flex; align-items:center; gap:8px; max-width:70%;
+           background:rgba(255,255,255,.95); border-radius:12px; padding:8px 10px; box-shadow:0 3px 8px rgba(0,0,0,.22); }
+.taskicon { width:26px; height:26px; border-radius:7px; background:#f3d9b0; display:flex; align-items:center;
+            justify-content:center; font-size:15px; flex:none; }
+.tasktxt b { display:block; font-size:13px; color:#3b2f26; }
+.tasktxt span { display:block; font-size:11px; color:#8a7a6c; margin-top:1px; }
+.taskarrow { margin-left:auto; color:#c9b9a8; font-size:19px; font-weight:800; padding-left:6px; }
+.res .plus { width:16px; height:16px; border-radius:50%; background:#57c84d; color:#fff; font-style:normal;
+             font-size:13px; font-weight:900; display:flex; align-items:center; justify-content:center; margin-left:3px; }
+#fx { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+.fx { position:absolute; font-size:26px; will-change:transform,opacity; transform:translate(-50%,-50%);
+      text-shadow:0 2px 6px rgba(0,0,0,.35); z-index:5; }
+.fx.pop { font-size:19px; font-weight:800; color:#ffb42e; text-shadow:0 2px 0 #7a4a00,0 3px 8px rgba(0,0,0,.4); }
+
+#mini { position:absolute; right:10px; top:86px; width:96px; height:96px; border-radius:12px;
+        border:2px solid rgba(255,255,255,.85); background:rgba(20,30,40,.55); }
+.compass { position:absolute; right:10px; top:188px; width:96px; text-align:center; color:#fff; font-size:11px;
+           text-shadow:0 1px 3px rgba(0,0,0,.6); }
+.compass .arw { font-size:26px; display:block; line-height:1; }
+
+.speed { position:absolute; right:10px; bottom:180px; background:rgba(0,0,0,.42); color:#fff; border-radius:10px;
+         padding:5px 9px; font-size:10px; text-align:center; line-height:1.3; }
+.speed b { font-size:18px; }
+.hint { position:absolute; left:12px; bottom:200px; color:#fff; font-size:11px; opacity:.85; line-height:1.5;
+        text-shadow:0 1px 3px rgba(0,0,0,.6); }
+
+.bottom { position:absolute; bottom:12px; left:0; right:0; display:flex; justify-content:center; gap:16px; }
+.bbtn { width:76px; height:58px; border-radius:14px; background:linear-gradient(180deg,#ffd98a,#ffb347);
+        border:3px solid #fff; box-shadow:0 4px 0 #d98b20,0 4px 10px rgba(0,0,0,.3);
+        display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.bbtn:active { transform:translateY(2px); }
+.bbtn em { font-size:20px; font-style:normal; line-height:1; }
+.bbtn span { font-size:12px; font-weight:800; color:#6b4310; margin-top:2px; }
+.bbtn img { height:84px; display:block; }
+.bbtn.img { width:auto; height:auto; padding:0; background:none; border:none; box-shadow:none;
+            filter:drop-shadow(0 3px 5px rgba(0,0,0,.35)); }
+.bbtn.img em, .bbtn.img span { display:none; }
+
+.stick { position:absolute; left:16px; bottom:88px; width:104px; height:104px; border-radius:50%;
+         background:rgba(255,255,255,.16); border:2px solid rgba(255,255,255,.5); }
+.stick i { position:absolute; left:50%; top:50%; width:46px; height:46px; margin:-23px 0 0 -23px; border-radius:50%;
+           background:rgba(255,255,255,.78); box-shadow:0 2px 6px rgba(0,0,0,.3); }
+.gas { position:absolute; right:16px; bottom:88px; width:74px; height:74px; border-radius:50%;
+       background:rgba(255,180,46,.88); border:3px solid #fff; color:#fff; font-size:14px; font-weight:800;
+       display:flex; align-items:center; justify-content:center; box-shadow:0 3px 8px rgba(0,0,0,.3); }
+.gas:active { background:rgba(255,140,20,.95); }
+.gas.img:active, .brake.img:active { transform:scale(.93); }
+#btnRide { position:absolute; right:16px; bottom:184px; width:56px; height:56px; border-radius:50%;
+           background:rgba(255,255,255,.92); border:3px solid #ff9d2e; color:#c25b00; font-size:14px;
+           font-weight:800; display:flex; align-items:center; justify-content:center;
+           box-shadow:0 3px 8px rgba(0,0,0,.3); }
+#btnRide:active { transform:scale(.93); }
+.brake { position:absolute; right:100px; bottom:98px; width:56px; height:56px; border-radius:50%;
+         background:rgba(60,70,80,.7); border:3px solid #fff; color:#fff; font-size:12px; font-weight:800;
+         display:flex; align-items:center; justify-content:center; }
+.gas img, .brake img { width:100%; height:100%; display:block; }
+.bbtn img, .gas img, .brake img { pointer-events:none; }
+.gas.img, .brake.img { background:none; border:none; box-shadow:none; font-size:0;
+                       filter:drop-shadow(0 3px 6px rgba(0,0,0,.35)); }
+.gas.img { width:80px; height:80px; }
+.brake.img { width:60px; height:60px; right:104px; bottom:100px; }
+
+.toast { position:absolute; top:40%; left:50%; transform:translate(-50%,-50%) scale(.9); opacity:0;
+         background:rgba(0,0,0,.75); color:#fff; padding:10px 18px; border-radius:20px; font-size:15px;
+         font-weight:700; transition:.25s; white-space:nowrap; }
+.toast.show { opacity:1; transform:translate(-50%,-50%) scale(1); }
+
+.mask { position:absolute; inset:0; background:rgba(0,0,0,.45); display:none; }
+.mask.on { display:block; }
+.panel { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:82%; background:#fff7ec;
+         border:4px solid #fff; border-radius:18px; padding:14px; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+.panel h3 { font-size:16px; color:#6b4310; margin-bottom:10px; text-align:center; }
+.panel .list { display:flex; flex-wrap:wrap; gap:8px; }
+.panel .cell { width:calc(33.33% - 6px); aspect-ratio:1; background:#f0e2cd; border-radius:10px; display:flex;
+               flex-direction:column; align-items:center; justify-content:center; font-size:11px; color:#8a6a44; gap:4px; }
+.panel .cell em { font-size:22px; font-style:normal; }
+.panel .close { margin-top:12px; height:34px; border-radius:10px; background:#ffb347; color:#fff; display:flex;
+                align-items:center; justify-content:center; font-weight:800; font-size:14px; }
+
+#loading { position:absolute; inset:0; background:#0f1418; color:#fff; display:flex; flex-direction:column;
+           align-items:center; justify-content:center; gap:10px; font-size:14px; letter-spacing:1px; z-index:9; }
+#loading .bar { width:60%; height:6px; border-radius:3px; background:rgba(255,255,255,.18); overflow:hidden; }
+#loading .bar i { display:block; height:100%; width:0; background:#ffb347; transition:width .2s; }
+#loading .tip { font-size:11px; letter-spacing:0; color:rgba(255,255,255,.55); text-align:center; padding:0 22px; }
+#loading .err { font-size:12px; line-height:1.6; white-space:pre-wrap; text-align:left; padding:0 22px; color:#ff9b8f; }
+#ldRetry { display:none; margin-top:4px; padding:10px 30px; font-size:15px; font-weight:800; color:#7a3f00;
+           border:none; border-radius:22px; background:#ffb347; letter-spacing:1px; }
+#ldRetry.on { display:block; }
+
+#start { position:absolute; inset:0; z-index:10; display:none; flex-direction:column; align-items:center;
+         justify-content:center; gap:16px; background:linear-gradient(180deg,#2f92e0,#7cc4f2 55%,#dcf1ff);
+         color:#20364a; text-align:center; padding:24px; }
+#start.on { display:flex; }
+#start h1 { font-size:26px; letter-spacing:2px; color:#fff; text-shadow:0 3px 8px rgba(0,60,110,.45); }
+#start p { font-size:13px; line-height:1.8; color:#0d3350; opacity:.9; }
+#start button { margin-top:6px; padding:13px 40px; font-size:17px; font-weight:800; color:#7a3f00; border:none;
+                border-radius:26px; background:linear-gradient(180deg,#ffd15c,#ff9f2e);
+                box-shadow:0 6px 0 #d8781a, 0 10px 18px rgba(0,0,0,.25); }
+#start button:active { transform:translateY(3px); box-shadow:0 3px 0 #d8781a; }
+#rotate { position:absolute; inset:0; z-index:11; display:none; align-items:center; justify-content:center;
+          background:#0f1418; color:#fff; font-size:15px; letter-spacing:1px; }
+@media (orientation:landscape) and (max-height:520px) { #rotate { display:flex; } }
+@media (max-width:430px) {
+  .topbar { gap:6px; }
+  .avatar { width:56px; height:56px; }
+  .pname { font-size:16px; }
+  .lvbar { width:92px; }
+  .lvbadge { width:22px; height:22px; font-size:12px; }
+  .res { font-size:11px; padding:2px 6px 2px 4px; }
+  .res .ic { width:16px; height:16px; }
+  .res .plus { display:none; }
+  .gear { width:28px; height:28px; font-size:15px; }
+  .taskbar, #mini { top:78px; }
+  .compass { top:180px; }
+  .bbtn img { height:74px; }
+  #btnRide { width:50px; height:50px; font-size:13px; bottom:174px; }
+  .gas.img { width:74px; height:74px; }
+  .brake.img { width:56px; height:56px; }
+}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three.module.js",
+  "three/addons/loaders/FBXLoader.js": "./vendor/loaders/FBXLoader.js",
+  "three/addons/utils/SkeletonUtils.js": "./vendor/utils/SkeletonUtils.js",
+  "three/addons/utils/BufferGeometryUtils.js": "./vendor/utils/BufferGeometryUtils.js"
+} }
+</script>
+</head>
+<body>
+<div id="stage">
+  <canvas id="gl"></canvas>
+  <div class="hud">
+    <div class="topbar">
+      <div class="avatar">
+        <svg viewBox="0 0 52 52"><rect width="52" height="52" fill="#bcd3e6"/>
+          <circle cx="26" cy="20" r="11" fill="#f6d2b0"/>
+          <path d="M13 19a13 13 0 0126 0c0-9-6-13-13-13s-13 4-13 13z" fill="#3b2b23"/>
+          <path d="M7 52c2-13 9-19 19-19s17 6 19 19z" fill="#f2f2f2"/></svg>
+        <img src="./assets/ui/avatar.png" alt="" onload="this.parentNode.classList.add('img')" onerror="this.remove()">
+      </div>
+      <div>
+        <div class="pname">小邮差星球</div>
+        <div class="lvrow"><div class="lvbadge" id="lvNum">1</div><div class="lvbar"><i id="lvFill"></i></div></div>
+        <div class="lvtxt" id="lvTxt">0/100</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="res"><div class="ic gold">¥</div><b id="coin">0</b><i class="plus">+</i></div>
+      <div class="res"><div class="ic pack">信</div><b id="parcel">0</b><i class="plus">+</i></div>
+      <div class="gear" id="btnGear">⚙</div>
+    </div>
+
+    <div class="taskbar"><div class="taskicon" id="taskIcon">📮</div>
+      <div class="tasktxt"><b id="taskTitle">新的信件</b><span id="taskDesc">去红色邮箱领取下一封信</span></div>
+      <div class="taskarrow">›</div></div>
+
+    <canvas id="mini" width="192" height="192"></canvas>
+    <div class="compass"><span class="arw" id="arw">➤</span><span id="dist">-- m</span></div>
+
+    <div class="speed">速度<br><b id="spd">0</b> km/h</div>
+    <div class="hint" id="hint">左摇杆转向 · 右侧油门/刹车</div>
+    <div id="dbg" style="position:absolute;left:8px;top:200px;max-width:70%;color:#fff;font-size:10px;line-height:1.5;
+         text-shadow:0 1px 2px #000;white-space:pre-wrap;"></div>
+
+    <div class="stick" id="stick"><i id="knob"></i></div>
+    <div id="btnRide">下车</div>
+    <div class="brake" id="brake">刹车<img src="./assets/ui/btn-brake.png" alt=""
+         onload="this.parentNode.classList.add('img')" onerror="this.remove()"></div>
+    <div class="gas" id="gas">油门<img src="./assets/ui/btn-gas.png" alt=""
+         onload="this.parentNode.classList.add('img')" onerror="this.remove()"></div>
+
+    <div class="bottom">
+      <div class="bbtn" data-panel="bag"><em>🎒</em><span>背包</span><img src="./assets/ui/btn-bag.png" alt=""
+           onload="this.parentNode.classList.add('img')" onerror="this.remove()"></div>
+      <div class="bbtn" data-panel="task"><em>📒</em><span>任务笔记</span><img src="./assets/ui/btn-note.png" alt=""
+           onload="this.parentNode.classList.add('img')" onerror="this.remove()"></div>
+      <div class="bbtn" data-panel="shop"><em>🛒</em><span>商店</span><img src="./assets/ui/btn-shop.png" alt=""
+           onload="this.parentNode.classList.add('img')" onerror="this.remove()"></div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+    <div id="fx"></div>
+    <div class="mask" id="mask">
+      <div class="panel"><h3 id="pTitle">背包</h3><div class="list" id="pList"></div>
+        <div class="close" id="pClose">关闭</div></div>
+    </div>
+  </div>
+      <div id="loading">加载小邮差城市…<div class="bar"><i id="ldFill"></i></div><div class="tip" id="ldTip"></div><div class="err" id="ldErr"></div><button id="ldRetry">重 试</button></div>
+  <div id="start">
+    <h1>小 邮 差</h1>
+    <p>骑上电动车穿过小城<br>去红色邮箱取信，再送到绿色光柱</p>
+    <button id="btnStart">开 始 送 信</button>
+    <p style="font-size:11px;opacity:.75">建议竖屏 · 支持全屏 · 可添加到主屏幕</p>
+  </div>
+  <div id="rotate">请竖屏体验 🙃</div>
+</div>
+<script>
+(function () {
+  var err = document.getElementById('ldErr');
+  function show(t) { err.textContent = t; }
+  window.addEventListener('error', function (e) { show('脚本错误：\n' + (e.message || e.type) + '\n' + (e.filename || '')); });
+  window.addEventListener('unhandledrejection', function (e) {
+    show('加载失败：\n' + (e.reason && (e.reason.message || e.reason) || '未知'));
+  });
+  if (location.protocol === 'file:') show('请用本地服务器打开：\n在 postman-3d 目录运行 serve.ps1，\n然后访问 http://localhost:8130/');
+})();
+</script>
+<script type="module" src="./game.js"></script>
+</body>
+</html>

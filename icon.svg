@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f92e0"/>
+      <stop offset="0.6" stop-color="#7cc4f2"/>
+      <stop offset="1" stop-color="#dcf1ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#sky)"/>
+  <rect x="0" y="352" width="512" height="160" fill="#3a3f45"/>
+  <rect x="0" y="424" width="512" height="10" fill="#e8e2cf"/>
+  <g fill="#e3d8c6" stroke="#171c23" stroke-width="10">
+    <rect x="42" y="176" width="112" height="176"/>
+    <rect x="366" y="146" width="118" height="206"/>
+  </g>
+  <g fill="#f0aac2" stroke="#171c23" stroke-width="10">
+    <circle cx="248" cy="212" r="58"/>
+  </g>
+  <g stroke="#171c23" stroke-width="12" fill="#f4efe4">
+    <rect x="176" y="286" width="128" height="58" rx="18"/>
+    <circle cx="196" cy="356" r="24" fill="#2b3138"/>
+    <circle cx="292" cy="356" r="24" fill="#2b3138"/>
+  </g>
+  <g stroke="#171c23" stroke-width="12" fill="#e8483f">
+    <rect x="182" y="252" width="52" height="42" rx="8"/>
+  </g>
+  <circle cx="272" cy="252" r="26" fill="#f6d2b0" stroke="#171c23" stroke-width="12"/>
+</svg>

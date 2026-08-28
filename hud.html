@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8">
+<title>HUD layout check</title>
+<style>body{margin:0;background:#222;display:flex;gap:12px;font:12px sans-serif;color:#fff}
+figure{margin:0}figcaption{padding:4px}
+iframe{border:0;display:block}</style>
+</head><body>
+<figure><figcaption>360 x 780</figcaption><iframe id="a" width="360" height="780"></iframe></figure>
+<figure><figcaption>430 x 930</figcaption><iframe id="b" width="430" height="930"></iframe></figure>
+<figure><figcaption>540 x 960</figcaption><iframe id="c" width="540" height="960"></iframe></figure>
+<script>
+fetch('./index.html').then(function (r) { return r.text(); }).then(function (html) {
+  html = html.replace(/<script type="module"[\s\S]*?<\/script>/, '')
+             .replace(/<script>[\s\S]*?<\/script>/, '')
+             .replace('</style>', '#loading,#start,#rotate{display:none!important}' +
+               '#stage canvas#gl{background:linear-gradient(180deg,#2f92e0,#7cc4f2 60%,#cfe9d0)}</style>')
+             .replace('</body>', '<script>' +
+               'document.getElementById("coin").textContent="1280";' +
+               'document.getElementById("parcel").textContent="7";' +
+               'document.getElementById("lvNum").textContent="5";' +
+               'document.getElementById("lvTxt").textContent="340/600";' +
+               'document.getElementById("lvFill").style.width="56%";' +
+               'document.getElementById("spd").textContent="42";' +
+               'document.getElementById("dist").textContent="86 m";' +
+               '<\/script></body>');
+  ['a', 'b', 'c'].forEach(function (id) { document.getElementById(id).srcdoc = html; });
+});
+</script>
+</body></html>

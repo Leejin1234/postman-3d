@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8">
+<title>boy views</title>
+<style>html,body{margin:0;background:#20262c;overflow:hidden}canvas{display:block}
+#tag{position:fixed;left:0;top:0;color:#fff;font:12px monospace;padding:4px;white-space:pre}</style>
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three.module.js",
+  "three/addons/loaders/FBXLoader.js": "./vendor/loaders/FBXLoader.js"
+} }
+</script>
+</head><body>
+<div id="tag"></div>
+<script type="module">
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+const W = 1200, H = 420;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(W, H);
+renderer.autoClear = false;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x20262c);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x556066, 1.1));
+const d = new THREE.DirectionalLight(0xffffff, 1.0); d.position.set(3, 6, 4); scene.add(d);
+
+/* 参考轴：+X 红，+Z 蓝 */
+const mk = (hex, x, z) => {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.14),
+    new THREE.MeshBasicMaterial({ color: hex }));
+  m.position.set(x, 0.07, z); scene.add(m);
+};
+mk(0xff4444, 1.2, 0); mk(0x4499ff, 0, 1.2);
+scene.add(new THREE.GridHelper(4, 8, 0x445055, 0x323a40));
+
+const cams = [];
+for (let i = 0; i < 3; i++) cams.push(new THREE.PerspectiveCamera(35, (W / 3) / H, 0.1, 50));
+
+new FBXLoader().load('./assets/the-boy.fbx', root => {
+  const b = new THREE.Box3().setFromObject(root);
+  const s = b.getSize(new THREE.Vector3());
+  root.scale.multiplyScalar(1.72 / s.y);
+  root.updateMatrixWorld(true);
+  const b2 = new THREE.Box3().setFromObject(root);
+  root.position.y -= b2.min.y;
+  root.position.x -= b2.getCenter(new THREE.Vector3()).x;
+  root.position.z -= b2.getCenter(new THREE.Vector3()).z;
+  scene.add(root);
+
+  const mixer = new THREE.AnimationMixer(root);
+  const byKey = k => root.animations
+    .filter(c => c.name.toLowerCase().endsWith(k))
+    .map(c => {
+      let ok = 0;
+      for (const t of c.tracks) if (root.getObjectByName(t.name.split('.')[0])) ok++;
+      return { c, ok };
+    }).sort((a, b) => b.ok - a.ok)[0];
+
+  const info = ['walk', 'run', 'jump', 'sit'].map(k => {
+    const r = byKey(k);
+    return k + ' -> "' + r.c.name + '" bind=' + r.ok + '/' + r.c.tracks.length + ' dur=' + r.c.duration.toFixed(2);
+  }).join('\n');
+
+  const poses = ['sit', 'walk', 'run'];
+  const times = [1.5, 0.5, 0.35];
+
+  cams[0].position.set(0, 1.1, 3.2);   // 看 +Z 面
+  cams[1].position.set(3.2, 1.1, 0);   // 看 +X 面
+  cams[2].position.set(2.4, 1.6, 2.4);
+  cams.forEach(c => c.lookAt(0, 0.85, 0));
+
+  document.getElementById('tag').textContent =
+    'bones=' + root.animations.length + ' clips\n' + info +
+    '\nviewport1: camera on +Z   viewport2: camera on +X   viewport3: 3/4\n' +
+    'red cube = +X   blue cube = +Z\nposes: sit / walk / run';
+
+  renderer.clear();
+  for (let i = 0; i < 3; i++) {
+    mixer.stopAllAction();
+    const a = mixer.clipAction(byKey(poses[i]).c);
+    a.play();
+    mixer.setTime(times[i]);
+    root.updateMatrixWorld(true);
+    const x = i * (W / 3);
+    renderer.setViewport(x, 0, W / 3, H);
+    renderer.setScissor(x, 0, W / 3, H);
+    renderer.setScissorTest(true);
+    renderer.render(scene, cams[i]);
+  }
+});
+</script>
+</body></html>

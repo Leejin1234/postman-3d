@@ -1,0 +1,16 @@
+{
+  "name": "小邮差 · 3D",
+  "short_name": "小邮差",
+  "description": "骑电动车穿过卡通小城送信的 3D 网页小游戏",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "portrait",
+  "background_color": "#0f1418",
+  "theme_color": "#8fd0f5",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

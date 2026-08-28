@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>资源预览</title>
+<style>body{margin:0;background:#222}canvas{display:block}</style>
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three.module.js",
+  "three/addons/loaders/FBXLoader.js": "./vendor/loaders/FBXLoader.js"
+} }
+</script>
+</head>
+<body>
+<canvas id="c" width="1200" height="900"></canvas>
+<script type="module">
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true });
+renderer.setClearColor(0x89c8f0);
+const loader = new FBXLoader();
+
+function fit(obj, target) {
+  const b = new THREE.Box3().setFromObject(obj);
+  const s = b.getSize(new THREE.Vector3());
+  const k = target / Math.max(s.x, s.y, s.z);
+  obj.scale.setScalar(k);
+  obj.updateMatrixWorld(true);
+  const b2 = new THREE.Box3().setFromObject(obj);
+  const c = b2.getCenter(new THREE.Vector3());
+  obj.position.sub(new THREE.Vector3(c.x, b2.min.y, c.z));
+  return b2.getSize(new THREE.Vector3());
+}
+
+const city = await loader.loadAsync('./assets/city-lowpoly.fbx');
+const bike = await loader.loadAsync('./assets/motuo.fbx');
+const boy = await loader.loadAsync('./assets/boy2.fbx');
+const citySize = fit(city, 300);
+const bikeSize = fit(bike, 6);
+const boySize = fit(boy, 6);
+
+const scene = new THREE.Scene();
+scene.add(new THREE.HemisphereLight(0xffffff, 0x808080, 1.1));
+const dl = new THREE.DirectionalLight(0xffffff, 1.2); dl.position.set(60, 120, 40); scene.add(dl);
+scene.add(city);
+
+const s2 = new THREE.Scene();
+s2.add(new THREE.HemisphereLight(0xffffff, 0x909090, 1.2));
+const dl2 = new THREE.DirectionalLight(0xffffff, 1.0); dl2.position.set(8, 14, 10); s2.add(dl2);
+bike.position.x = -4; boy.position.x = 4;
+s2.add(bike, boy);
+const axes = new THREE.AxesHelper(5); s2.add(axes);
+
+const w = 1200, h = 900;
+function shot(sc, cam, x, y, vw, vh) {
+  renderer.setViewport(x, y, vw, vh);
+  renderer.setScissor(x, y, vw, vh);
+  renderer.setScissorTest(true);
+  cam.aspect = vw / vh; cam.updateProjectionMatrix();
+  renderer.render(sc, cam);
+}
+renderer.autoClear = false;
+renderer.clear();
+
+const top = new THREE.PerspectiveCamera(45, 1, 1, 3000);
+top.position.set(0, 420, 1);
+top.lookAt(0, 0, 0);
+shot(scene, top, 0, 450, 600, 450);
+
+const eye = new THREE.PerspectiveCamera(55, 1, 0.5, 2000);
+eye.position.set(0, 8, 120);
+eye.lookAt(0, 6, 0);
+shot(scene, eye, 600, 450, 600, 450);
+
+const eye2 = new THREE.PerspectiveCamera(55, 1, 0.5, 2000);
+eye2.position.set(90, 10, 90);
+eye2.lookAt(0, 5, 0);
+shot(scene, eye2, 0, 0, 600, 450);
+
+const side = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
+side.position.set(2, 5, 22);
+side.lookAt(0, 3, 0);
+shot(s2, side, 600, 0, 600, 450);
+
+const o = document.createElement('div');
+o.style.cssText = 'position:fixed;left:4px;top:4px;color:#fff;font:12px monospace;text-shadow:0 0 3px #000';
+o.textContent = `city ${citySize.x.toFixed(0)}x${citySize.y.toFixed(0)}x${citySize.z.toFixed(0)} | bike ${bikeSize.x.toFixed(2)}/${bikeSize.y.toFixed(2)}/${bikeSize.z.toFixed(2)} | boy ${boySize.x.toFixed(2)}/${boySize.y.toFixed(2)}/${boySize.z.toFixed(2)}`;
+document.body.appendChild(o);
+</script>
+</body>
+</html>

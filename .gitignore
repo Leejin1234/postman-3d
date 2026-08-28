@@ -1,0 +1,17 @@
+# 构建产物（pack.ps1 生成，dist 自己是 gh-pages 仓库，别嵌套进来）
+dist/
+postman-3d.zip
+*.zip
+
+# 验证用截图，随时可重新生成
+_*.png
+_shots/
+_*.log
+
+# 事故残留（PowerShell 编码事故留下的乱码文件）
+*.broken
+
+# 系统垃圾
+Thumbs.db
+desktop.ini
+.DS_Store
