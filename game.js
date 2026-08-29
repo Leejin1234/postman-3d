@@ -521,7 +521,7 @@ function coinPop(gain) {
      2. 下载失败退避重试 —— 手机弱网下断一次不至于整局白费              */
 const loader = new FBXLoader();
 
-const CACHE_NAME = 'postman-assets-v3';
+const CACHE_NAME = 'postman-assets-v4';
 const NOCACHE = /(\?|&)nocache/.test(location.search);
 let assetCache;
 
@@ -1680,9 +1680,9 @@ async function boot() {
   addOutline(bikeHolder, 0.021);
 
   setProgress(0.85, '加载骑手…');
-  const boyRoot = await loadOne('./assets/the-boy.fbx');
+  const boyRoot = await loadOne('./assets/boy-final.fbx');
   normalize(boyRoot, { height: CFG.riderHeight });
-  toonify(boyRoot, { map: inkTexture(await loadTex('./assets/the-boy_basecolor.jpg'), { threshold: 0.16 }) });
+  toonify(boyRoot, { map: inkTexture(await loadTex('./assets/boy-final_basecolor.jpg'), { threshold: 0.16 }) });
   boyRoot.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
   addOutline(boyRoot, 0.013);
 
@@ -1695,13 +1695,16 @@ async function boot() {
   const walkClip = clipOf('walk');
   const runClip = clipOf('run');
   const jumpClip = clipOf('jump');
+  const waitClip = clipOf('wait');
   if (walkClip) stripRootMotion(walkClip);
   if (runClip) stripRootMotion(runClip);
   if (jumpClip) stripRootMotion(jumpClip);
+  if (waitClip) stripRootMotion(waitClip);
   if (sitClip) boy.actions.sit = boy.mixer.clipAction(sitClip);
-  if (walkClip) {
-    boy.actions.walk = boy.mixer.clipAction(walkClip);
-    /* 没有站立待机动画：用行走片段的第一帧当站姿 */
+  if (walkClip) boy.actions.walk = boy.mixer.clipAction(walkClip);
+  if (waitClip) boy.actions.idle = boy.mixer.clipAction(waitClip);
+  else if (walkClip) {
+    /* 模型里没有待机动画时的退路：拿行走的第一帧冻住当站姿 */
     const idle = boy.mixer.clipAction(walkClip.clone());
     idle.timeScale = 0;
     boy.actions.idle = idle;
