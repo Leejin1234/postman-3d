@@ -20,14 +20,20 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 const out = document.getElementById('out');
 const log = s => { out.textContent += s + '\n'; };
 
-new FBXLoader().load('./assets/the-boy.fbx', root => {
+/* ?m=boy-final.fbx 可指定模型，默认 the-boy.fbx */
+const FILE = (location.search.match(/[?&]m=([^&]+)/) || [])[1] || 'the-boy.fbx';
+
+new FBXLoader().load('./assets/' + FILE, root => {
   out.textContent = '';
   const box = new THREE.Box3().setFromObject(root);
   const size = box.getSize(new THREE.Vector3());
-  log('=== the-boy.fbx ===');
+  log('=== ' + FILE + ' ===');
   log('bbox size  ' + size.x.toFixed(2) + ' x ' + size.y.toFixed(2) + ' x ' + size.z.toFixed(2));
   log('bbox min.y ' + box.min.y.toFixed(2) + '  max.y ' + box.max.y.toFixed(2));
   log('root scale ' + JSON.stringify(root.scale));
+  /* 哪个轴最薄 = 人的前后方向，据此判断模型朝向 */
+  log('最薄的轴 = ' + (size.x < size.z ? 'X（人面向 ±X）' : 'Z（人面向 ±Z）') +
+      '  x/z = ' + (size.x / size.z).toFixed(2));
 
   let meshes = 0, skinned = 0, tris = 0, bones = 0, mats = [];
   root.traverse(o => {

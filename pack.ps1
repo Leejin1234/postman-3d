@@ -18,7 +18,7 @@ Copy-Item (Join-Path $root 'vendor') $dist -Recurse
 $assets = @(
   'city-lowpoly.fbx', 'City_low_poly_1024.png',
   'motuo.fbx', 'motuo_basecolor.jpg',
-  'the-boy.fbx', 'the-boy_basecolor.jpg'
+  'boy-final.fbx', 'boy-final_basecolor.jpg'
 )
 foreach ($a in $assets) {
   Copy-Item (Join-Path $root "assets\$a") (Join-Path $dist 'assets')

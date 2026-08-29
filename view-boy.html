@@ -38,7 +38,7 @@ scene.add(new THREE.GridHelper(4, 8, 0x445055, 0x323a40));
 const cams = [];
 for (let i = 0; i < 3; i++) cams.push(new THREE.PerspectiveCamera(35, (W / 3) / H, 0.1, 50));
 
-new FBXLoader().load('./assets/the-boy.fbx', root => {
+new FBXLoader().load('./assets/' + ((location.search.match(/[?&]m=([^&]+)/) || [])[1] || 'the-boy.fbx'), root => {
   const b = new THREE.Box3().setFromObject(root);
   const s = b.getSize(new THREE.Vector3());
   root.scale.multiplyScalar(1.72 / s.y);
@@ -58,8 +58,9 @@ new FBXLoader().load('./assets/the-boy.fbx', root => {
       return { c, ok };
     }).sort((a, b) => b.ok - a.ok)[0];
 
-  const info = ['walk', 'run', 'jump', 'sit'].map(k => {
+  const info = ['walk', 'run', 'jump', 'sit', 'wait'].map(k => {
     const r = byKey(k);
+    if (!r) return k + ' -> (无)';
     return k + ' -> "' + r.c.name + '" bind=' + r.ok + '/' + r.c.tracks.length + ' dur=' + r.c.duration.toFixed(2);
   }).join('\n');
 
