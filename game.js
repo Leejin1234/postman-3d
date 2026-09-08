@@ -8,27 +8,36 @@ const DEBUG = /(\?|&)debug/.test(location.search);
 const AUTO = /(\?|&)auto/.test(location.search);
 const SELFTEST = /(\?|&)selftest/.test(location.search);
 
+/* 星球城市是按「巨人尺度」建的：路灯 28.8 米高、马路 16 米宽、楼 30 米高，
+   照真人 1.72 米放进去，人和车就成了地上的小蚂蚁。
+   所以整套长度和速度都乘 S，角速度（转向、转身）保持不变——
+   这样转弯半径 v/ω 和跳跃高度 v²/2g 也正好跟着放大 S 倍，手感和放大前一致。
+   凡是描述城市模型本身的量（FLAT、EYE、VIEW_ARC、雾、格网分辨率）不参与缩放。 */
+const S = 3;
+
 const CFG = {
-  bikeLen: 1.95,
-  riderHeight: 1.72,
-  maxSpeed: 17,
-  accel: 11,
-  brake: 22,
-  drag: 0.8,
-  steer: 2.3,
-  reachRadius: 4.2,
-  walkSpeed: 1.9,
-  runSpeed: 5.4,
-  jumpVel: 4.8,
-  gravity: 15,
-  footTurn: 10,
-  footRadius: 0.42,
-  mountRange: 3.4,
+  bikeLen: 1.95 * S,
+  riderHeight: 1.72 * S,
+  maxSpeed: 17 * S,
+  accel: 11 * S,
+  brake: 22 * S,
+  drag: 0.8,                    // 1/秒，与尺度无关
+  steer: 2.3,                   // 弧度/秒，与尺度无关
+  reachRadius: 4.2 * S,
+  walkSpeed: 1.9 * S,
+  runSpeed: 5.4 * S,
+  jumpVel: 4.8 * S,
+  gravity: 15 * S,
+  footTurn: 10,                 // 弧度/秒的跟随系数，与尺度无关
+  footRadius: 0.42 * S,
+  mountRange: 3.4 * S,
+  bikeRadius: 0.7 * S,          // 电动车的碰撞半径
   shadowSize: IS_MOBILE ? 1024 : 2048,
-  shadowSpan: IS_MOBILE ? 38 : 52,
-  /* 星球半径只有 600 米，地平线在百来米外就收口了，雾也要跟着收紧，
-     否则远处物体是「突然出现」而不是「从雾里浮出来」 */
-  fog: IS_MOBILE ? [70, 210] : [90, 260],
+  shadowSpan: (IS_MOBILE ? 38 : 52) * S,
+  /* 星球半径只有 600 米，地平线在两三百米外就收口了，雾也要跟着收紧，
+     否则远处物体是「突然出现」而不是「从雾里浮出来」。
+     雾的远端要压在 VIEW_ARC 附近，正好盖住高楼被剔除时的那一下跳变。 */
+  fog: IS_MOBILE ? [120, 250] : [160, 285],
   maxDpr: IS_MOBILE ? 1.6 : 2
 };
 
@@ -56,7 +65,7 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xcfe8f7, CFG.fog[0], CFG.fog[1]);
 
-const camera = new THREE.PerspectiveCamera(52, 1, 0.15, IS_MOBILE ? 600 : 900);
+const camera = new THREE.PerspectiveCamera(52, 1, 0.15 * S, IS_MOBILE ? 600 : 900);
 camera.position.set(0, 6, -10);
 
 const sky = new THREE.Mesh(
@@ -104,20 +113,20 @@ const cloudTex = cloudTexture();
 const clouds = [];
 for (let i = 0; i < (IS_MOBILE ? 12 : 20); i++) {
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.9, fog: false, depthWrite: false }));
-  const s = 70 + Math.random() * 90;
+  const s = (70 + Math.random() * 90) * S;
   sp.scale.set(s, s * 0.46, 1);
   scene.add(sp);
   clouds.push({
     sp,
-    u: rand(-300, 300), v: rand(-260, 260), h: 48 + Math.random() * 80,
-    spd: 1.1 + Math.random() * 1.5
+    u: rand(-300, 300), v: rand(-260, 260), h: (48 + Math.random() * 80) * S,
+    spd: (1.1 + Math.random() * 1.5) * S
   });
 }
 
 scene.add(new THREE.HemisphereLight(0xcce6f8, 0xb4b79c, 0.46));
 scene.add(new THREE.AmbientLight(0xffffff, 0.26));
 const sun = new THREE.DirectionalLight(0xfff8e6, 1.3);
-sun.position.set(46, 86, 38);
+sun.position.set(46 * S, 86 * S, 38 * S);
 sun.castShadow = true;
 sun.shadow.mapSize.set(CFG.shadowSize, CFG.shadowSize);
 sun.shadow.bias = -0.0006;
@@ -126,7 +135,7 @@ sun.shadow.radius = IS_MOBILE ? 1 : 2;
 const sc = sun.shadow.camera;
 sc.left = -CFG.shadowSpan; sc.right = CFG.shadowSpan;
 sc.top = CFG.shadowSpan; sc.bottom = -CFG.shadowSpan;
-sc.near = 1; sc.far = 240;
+sc.near = 1; sc.far = 240 * S;
 scene.add(sun, sun.target);
 
 /* ---------- toon shading ---------- */
@@ -331,6 +340,7 @@ function carGeo(paintHex, taxi) {
   ];
   if (taxi) parts.push(pbox(0.5, 0.16, 0.24, 0, 1.52, -0.12, 0xfff6d8));
   const g = mergeParts(parts);
+  g.scale(S, S, S);                     // 自造的车也要按巨人尺度放大
   carGeoCache.set(key, g);
   return g;
 }
@@ -341,12 +351,12 @@ function wallProbe(q) {
   let best = null;
   for (let i = 0; i < 4; i++) {
     const ang = i * Math.PI / 2;
-    let d = 7;
-    for (let t = 1.2; t < 7; t += 0.7) {
+    let d = 7 * S;
+    for (let t = 1.2 * S; t < 7 * S; t += 0.7 * S) {
       _wpQ.copy(q);
       turn(_wpQ, ang);
       advance(_wpQ, t);
-      if (blockedAt(_wpQ, 0.5)) { d = t; break; }
+      if (blockedAt(_wpQ, 0.5 * S)) { d = t; break; }
     }
     if (!best || d < best.d) best = { ang, d };
   }
@@ -367,56 +377,56 @@ function placeParked(n) {
   const m = new THREE.Matrix4(), pos = new THREE.Vector3();
   for (let i = 0, tries = 0; i < n && tries < n * 14; tries++) {
     /* 只停在出生点这片街区，撒满整颗星球的话一辆也看不见 */
-    const road = findRoadFrame(2.2, state.q, 320);
+    const road = findRoadFrame(2.2 * S, state.q, 320 * S);
     const w = wallProbe(road);
-    if (!w || w.d < 3.4 || w.d > 5.6) continue;
+    if (!w || w.d < 3.4 * S || w.d > 5.6 * S) continue;
     /* 先朝墙那侧挪过去，再转 90° 让车身与街道平行 */
     q.copy(road);
     turn(q, w.ang);
-    advance(q, w.d - 2.6);
+    advance(q, w.d - 2.6 * S);
     turn(q, Math.PI / 2);
     if (Math.random() < 0.5) turn(q, Math.PI);
     if (!onFlatRoad(q)) continue;
     back.copy(q);
     turn(back, Math.PI);
-    if (!dirClear(q, 3.4, 1.1) || !dirClear(back, 3.4, 1.1)) continue;
+    if (!dirClear(q, 3.4 * S, 1.1 * S) || !dirClear(back, 3.4 * S, 1.1 * S)) continue;
     framePos(q, 0, pos);
-    if (placed.some(p => p.distanceTo(pos) < 6)) continue;
-    if (state.mailboxes.some(mb => mb.position.distanceTo(pos) < 4)) continue;
+    if (placed.some(p => p.distanceTo(pos) < 6 * S)) continue;
+    if (state.mailboxes.some(mb => mb.position.distanceTo(pos) < 4 * S)) continue;
     placed.push(pos.clone());
     const taxi = Math.random() < 0.25;
     const g = carGeo(taxi ? 0xffc63a : CAR_PAINTS[(Math.random() * CAR_PAINTS.length) | 0], taxi).clone();
     g.applyMatrix4(frameMatrix(q, 0, m));
     geos.push(g);
-    stampOcc(q, 1.1);
+    stampOcc(q, 1.1 * S);
     i++;
   }
   if (!geos.length) return;
   const mesh = new THREE.Mesh(mergeParts(geos), VC_MAT);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
-  addOutline(mesh, 0.015);
+  addOutline(mesh, 0.015 * S);
   scene.add(mesh);
 }
 
 /* ---------- 路上车流 ---------- */
 const traffic = [];
-const CAR_SPEED = 6.5;
+const CAR_SPEED = 6.5 * S;
 const _scPos = new THREE.Vector3(), _scNear = new THREE.Vector3();
 function spawnCar(c, nearQ) {
   if (nearQ) framePos(nearQ, 0, _scNear);
   for (let i = 0; i < 30; i++) {
-    const q = findRoadFrame(2.4, nearQ, nearQ ? 95 : 0);
+    const q = findRoadFrame(2.4 * S, nearQ, nearQ ? 95 * S : 0);
     framePos(q, 0, _scPos);
-    if (nearQ && _scPos.distanceTo(_scNear) < 14) continue;
+    if (nearQ && _scPos.distanceTo(_scNear) < 14 * S) continue;
     /* 找一个能往前开一段的朝向 */
     let ok = false;
     for (let k = 0; k < 4; k++) {
-      if (dirClear(q, 12)) { ok = true; break; }
+      if (dirClear(q, 12 * S)) { ok = true; break; }
       turn(q, Math.PI / 2);
     }
     if (!ok) continue;
-    if (traffic.some(o => o !== c && o.alive && o.mesh.position.distanceTo(_scPos) < 7)) continue;
+    if (traffic.some(o => o !== c && o.alive && o.mesh.position.distanceTo(_scPos) < 7 * S)) continue;
     c.q.copy(q);
     c.v = 0;
     c.stuck = 0;
@@ -435,7 +445,7 @@ function initTraffic(n) {
     const mesh = new THREE.Mesh(
       carGeo(taxi ? 0xffc63a : CAR_PAINTS[(Math.random() * CAR_PAINTS.length) | 0], taxi), VC_MAT);
     mesh.castShadow = true;
-    addOutline(mesh, 0.015);
+    addOutline(mesh, 0.015 * S);
     scene.add(mesh);
     const c = { mesh, q: new THREE.Quaternion(), v: 0, stuck: 0, alive: false };
     traffic.push(c);
@@ -466,16 +476,16 @@ function updateTraffic(dt) {
   for (const c of traffic) {
     if (!c.alive) continue;
     let want = CAR_SPEED;
-    if (!dirClear(c.q, 5.2)) {
+    if (!dirClear(c.q, 5.2 * S)) {
       _tq1.copy(c.q); turn(_tq1, Math.PI / 2);
       _tq2.copy(c.q); turn(_tq2, -Math.PI / 2);
-      if (dirClear(_tq1, 8)) c.q.copy(_tq1);
-      else if (dirClear(_tq2, 8)) c.q.copy(_tq2);
+      if (dirClear(_tq1, 8 * S)) c.q.copy(_tq1);
+      else if (dirClear(_tq2, 8 * S)) c.q.copy(_tq2);
       else want = 0;
     } else if (Math.random() < dt * 0.25) {
       _tq1.copy(c.q);
       turn(_tq1, Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2);
-      if (dirClear(_tq1, 9)) c.q.copy(_tq1);
+      if (dirClear(_tq1, 9 * S)) c.q.copy(_tq1);
     }
 
     const cp = c.mesh.position;
@@ -483,18 +493,18 @@ function updateTraffic(dt) {
     for (const o of traffic) {
       if (o === c || !o.alive) continue;
       _tD.copy(o.mesh.position).sub(cp);
-      if (_tD.dot(_tFwd) > 0.5 && _tD.lengthSq() < 16) { want = 0; break; }
+      if (_tD.dot(_tFwd) > 0.5 && _tD.lengthSq() < 16 * S * S) { want = 0; break; }
     }
     _tD.copy(fp).sub(cp);
-    if (_tD.dot(_tFwd) > 0.3 && _tD.lengthSq() < 14) want = 0;
+    if (_tD.dot(_tFwd) > 0.3 && _tD.lengthSq() < 14 * S * S) want = 0;
 
-    c.v += clamp(want - c.v, -9 * dt, 2.5 * dt);
+    c.v += clamp(want - c.v, -9 * S * dt, 2.5 * S * dt);
     if (c.v > 0.05) {
       _tq1.copy(c.q);
       advance(_tq1, c.v * dt);
       _tq2.copy(_tq1);
-      advance(_tq2, 1.9);
-      if (!blockedAt(_tq2, 0.95)) { c.q.copy(_tq1); c.stuck = 0; }
+      advance(_tq2, 1.9 * S);
+      if (!blockedAt(_tq2, 0.95 * S)) { c.q.copy(_tq1); c.stuck = 0; }
       else {
         c.v = 0;
         c.stuck += dt;
@@ -505,15 +515,15 @@ function updateTraffic(dt) {
     c.mesh.quaternion.slerp(c.q, Math.min(1, dt * 7));
 
     const dd = cp.distanceTo(fp);
-    if (dd < 2.1 && dd > 0.01) {
-      pushAway(fq, cp, 2.1 - dd);
+    if (dd < 2.1 * S && dd > 0.01) {
+      pushAway(fq, cp, 2.1 * S - dd);
       if (state.onBike) state.speed *= 0.3; else foot.speed *= 0.3;
       if (!state.bumpT || clock.elapsedTime - state.bumpT > 2) {
         state.bumpT = clock.elapsedTime;
         toast('小心车辆！');
       }
     }
-    if (dd > 115) spawnCar(c, fq);
+    if (dd > 115 * S) spawnCar(c, fq);
   }
 }
 
@@ -784,9 +794,9 @@ function dedupeGeometries(root) {
     if (!p || !p.count) return;
     total++;
     let h = p.count + ':' + (g.index ? g.index.count : 0);
-    const S = 12;
-    for (let i = 0; i < S; i++) {
-      const j = Math.floor(i * (p.count - 1) / (S - 1));
+    const NS = 12;                      // 采样 12 个顶点当指纹
+    for (let i = 0; i < NS; i++) {
+      const j = Math.floor(i * (p.count - 1) / (NS - 1));
       h += '|' + p.getX(j).toFixed(3) + ',' + p.getY(j).toFixed(3) + ',' + p.getZ(j).toFixed(3);
     }
     const hit = map.get(h);
@@ -1206,7 +1216,7 @@ function stampOcc(q, r) {
    眼高 e 时地平线在 acos(R/(R+e)) 角距处，高 H 的物体自己还能再露出 acos(R/(R+H))，
    两者相加就是它有可能被看到的最大角距。每帧只要一个点积，比多画一千次便宜得多。 */
 const EYE = 15;
-const VIEW_ARC = 265;              // 再远的东西已经被雾吃掉了，不必再画
+const VIEW_ARC = 290;              // 再远的东西已经被雾吃掉了，不必再画
 const horizon = [];
 const _hzC = new THREE.Vector3(), _hzB = new THREE.Box3(), _hzP = new THREE.Vector3();
 function prepareHorizon(root) {
@@ -1245,7 +1255,7 @@ function horizonCull(q) {
 
 /* ---------- 碰撞查询 ---------- */
 const _blU = new THREE.Vector3(), _blF = new THREE.Vector3(), _blR = new THREE.Vector3(), _blT = new THREE.Vector3();
-function blockedAt(q, r = 0.7) {
+function blockedAt(q, r = CFG.bikeRadius) {
   if (!GRID.occ) return false;
   fUp(q, _blU);
   if (blockedDir(_blU)) return true;
@@ -1262,25 +1272,25 @@ function blockedAt(q, r = 0.7) {
 
 /* 从 frame 出发，正前方 dist 米内是否通畅 */
 const _dcQ = new THREE.Quaternion();
-function dirClear(q, dist, r = 1.05) {
+function dirClear(q, dist, r = 1.05 * S) {
   _dcQ.copy(q);
-  advance(_dcQ, 2);
-  for (let d = 2; d <= dist; d += 1.6) {
+  advance(_dcQ, 2 * S);
+  for (let d = 2 * S; d <= dist; d += 1.6 * S) {
     if (blockedAt(_dcQ, r)) return false;
-    advance(_dcQ, 1.6);
+    advance(_dcQ, 1.6 * S);
   }
   return true;
 }
 
 /* 这个位置周围的空旷半径（米），用来找马路中间 */
 const _orQ = new THREE.Quaternion(), _orU = new THREE.Vector3();
-function openRadius(q, max = 7) {
-  for (let r = 1; r <= max; r++) {
+function openRadius(q, max = 7 * S) {
+  for (let r = S; r <= max; r += S) {
     for (let a = 0; a < 8; a++) {
       _orQ.copy(q);
       turn(_orQ, a * Math.PI / 4);
       advance(_orQ, r);
-      if (blockedDir(fUp(_orQ, _orU))) return r - 1;
+      if (blockedDir(fUp(_orQ, _orU))) return r - S;
     }
   }
   return max;
@@ -1290,7 +1300,7 @@ function openRadius(q, max = 7) {
    光栅化时会把车道标记漏进邻格，只查中心点会把人放到路缘外的绿化带上。 */
 const _daU = new THREE.Vector3(), _daF = new THREE.Vector3();
 const _daR = new THREE.Vector3(), _daT = new THREE.Vector3();
-function driveAt(q, r = 1.5) {
+function driveAt(q, r = 1.5 * S) {
   fUp(q, _daU);
   if (!driveDir(_daU)) return false;
   if (!GRID.surf || !r) return true;
@@ -1316,7 +1326,7 @@ function onFlatRoad(q) {
 /* 随机找一个「路面上」的 frame：平地 + 不挡路 + 周围有一定空旷度。
    near 给定时只在它周围 maxDist 米内找；pave 为真时人行道也算。 */
 const _frU = new THREE.Vector3(), _frD = new THREE.Vector3();
-function findRoadFrame(minOpen = 3, near = null, maxDist = 0, pave = false) {
+function findRoadFrame(minOpen = 3 * S, near = null, maxDist = 0, pave = false) {
   const q = new THREE.Quaternion();
   for (let i = 0; i < 1500; i++) {
     if (near && maxDist) {
@@ -1330,33 +1340,33 @@ function findRoadFrame(minOpen = 3, near = null, maxDist = 0, pave = false) {
     }
     fUp(q, _frU);
     if (groundR(_frU) > PLANET.R + FLAT) continue;
-    if (!(pave ? paveDir(_frU) : driveAt(q, 1.5))) continue;
+    if (!(pave ? paveDir(_frU) : driveAt(q))) continue;
     if (blockedDir(_frU)) continue;
-    if (openRadius(q, minOpen + 1) < minOpen) continue;
+    if (openRadius(q, minOpen + S) < minOpen) continue;
     turn(q, rand(0, Math.PI * 2));
     return q;
   }
   return frameFromDir(YAXIS, null, q);
 }
 
-/* 出生点：找一块空旷、且至少有一个方向能连着开 22 米的地方 */
+/* 出生点：找一块空旷、且至少有一个方向能连着开 22 个车身长的地方 */
 function pickSpawn() {
   let best = null;
   for (let i = 0; i < 60; i++) {
-    const q = findRoadFrame(3);
-    const r = openRadius(q, 7);
-    if (r < 3) continue;
+    const q = findRoadFrame(3 * S);
+    const r = openRadius(q, 7 * S);
+    if (r < 3 * S) continue;
     for (let k = 0; k < 4; k++) {
-      if (dirClear(q, 22, 1.2)) {
-        const score = r * 10 + 22;
+      if (dirClear(q, 22 * S, 1.2 * S)) {
+        const score = r * 10 + 22 * S;
         if (!best || score > best.score) best = { q: q.clone(), score };
         break;
       }
       turn(q, Math.PI / 2);
     }
-    if (best && best.score > 90) break;
+    if (best && best.score > 90 * S) break;
   }
-  return best ? best.q : findRoadFrame(1);
+  return best ? best.q : findRoadFrame(S);
 }
 
 /* ---------- 邮箱 / 标记 ---------- */
@@ -1371,11 +1381,12 @@ function makeMailbox(q) {
       pcyl(0.09, 0.09, 0.66, 8, 0, 0.33, 0, 0x39404a),
       pbox(0.4, 0.07, 0.04, 0, 1.3, 0.26, 0x39404a)
     ]);
+    mailboxGeo.scale(S, S, S);          // 城市是巨人尺度，邮箱也得跟着大
   }
   const g = new THREE.Mesh(mailboxGeo, VC_MAT);
   g.castShadow = true;
   g.receiveShadow = true;
-  addOutline(g, 0.022);
+  addOutline(g, 0.022 * S);
   /* 站到球面上：本地 +Y 朝天由 frame 的四元数直接给出 */
   framePos(q, 0, g.position);
   g.quaternion.copy(q);
@@ -1416,6 +1427,8 @@ function makeMarker(color, icon) {
   g.add(ring, beam, sp);
   g.userData.ring = ring;
   g.userData.icon = sp;
+  /* 光柱按整组放大：updateMarkers 里的 3.2 / 0.22 也就自动跟着放大了 */
+  g.scale.setScalar(S);
   scene.add(g);
   return g;
 }
@@ -1504,13 +1517,13 @@ function dismount() {
   walkerRig.add(boy.pivot);
   boy.pivot.position.set(0, 0, 0);
 
-  /* 从车侧下来：先转 90° 走 1.15 米，再把朝向转回和车一致 */
-  const side = q => { turn(q, Math.PI / 2); advance(q, 1.15); turn(q, -Math.PI / 2); };
+  /* 从车侧下来：先转 90° 走一个车宽，再把朝向转回和车一致 */
+  const side = q => { turn(q, Math.PI / 2); advance(q, 1.15 * S); turn(q, -Math.PI / 2); };
   _dmQ.copy(state.q);
   side(_dmQ);
   if (blockedAt(_dmQ, CFG.footRadius)) {
     _dmQ.copy(state.q);
-    turn(_dmQ, -Math.PI / 2); advance(_dmQ, 1.15); turn(_dmQ, Math.PI / 2);
+    turn(_dmQ, -Math.PI / 2); advance(_dmQ, 1.15 * S); turn(_dmQ, Math.PI / 2);
   }
   if (blockedAt(_dmQ, CFG.footRadius)) _dmQ.copy(state.q);
   foot.q.copy(_dmQ);
@@ -1583,7 +1596,7 @@ function nextTask() {
     let mb = null, bd = Infinity;
     for (const c of state.mailboxes) {
       const d = c.position.distanceTo(here);
-      if (d > 25 && d < bd) { bd = d; mb = c; }
+      if (d > 25 * S && d < bd) { bd = d; mb = c; }
     }
     if (!mb) mb = state.mailboxes[Math.floor(Math.random() * state.mailboxes.length)];
     state.target = mb.position.clone();
@@ -1594,7 +1607,7 @@ function nextTask() {
     $('taskDesc').textContent = '去红色邮箱领取下一封信';
     $('taskIcon').textContent = '📮';
   } else {
-    const q = findRoadFrame(2.5, focusFrame(), 60, true);
+    const q = findRoadFrame(2.5 * S, focusFrame(), 60 * S, true);
     state.targetQ = q;
     state.target = framePos(q, 0, new THREE.Vector3());
     placeMarker(dropMarker, q);
@@ -1739,9 +1752,10 @@ function buildMiniImage() {
 const _mmU = new THREE.Vector3(), _mmN = new THREE.Vector3(), _mmE = new THREE.Vector3();
 const _mmF = new THREE.Vector3(), _mmD = new THREE.Vector3();
 function drawMini() {
-  const S = mini.width, RV = 62;
+  /* PX 是画布像素边长，RV 是小地图半径对应的世界米数（跟着巨人尺度放大） */
+  const PX = mini.width, RV = 62 * S;
   mg.fillStyle = '#1a222a';
-  mg.fillRect(0, 0, S, S);
+  mg.fillRect(0, 0, PX, PX);
   const fq = focusFrame(), fp = focusPos();
   fUp(fq, _mmU);
   /* 当地的「北」= 世界 +Y 投到切平面；东 = 北 × 上（与经度 u 增大方向一致） */
@@ -1749,7 +1763,7 @@ function drawMini() {
   if (_mmN.lengthSq() < 1e-6) fFwd(fq, _mmN);
   _mmN.normalize();
   _mmE.crossVectors(_mmN, _mmU).normalize();
-  const k = S / (RV * 2);
+  const k = PX / (RV * 2);
 
   if (GRID.img) {
     const W = GRID.gw, H = GRID.gh;
@@ -1761,18 +1775,18 @@ function drawMini() {
     const dw = halfU * 2, dh = halfV * 2;
     mg.imageSmoothingEnabled = false;
     mg.save();
-    mg.beginPath(); mg.rect(0, 0, S, S); mg.clip();
+    mg.beginPath(); mg.rect(0, 0, PX, PX); mg.clip();
     /* 跨 ±180° 经线时窗口一半在图的另一端，左右各补画一次 */
     for (const sh of [-W, 0, W]) {
-      mg.drawImage(GRID.img, cu - halfU + sh, cv - halfV, dw, dh, -sh * (S / dw), 0, S, S);
+      mg.drawImage(GRID.img, cu - halfU + sh, cv - halfV, dw, dh, -sh * (PX / dw), 0, PX, PX);
     }
     mg.restore();
   }
 
   const dot = (pos, color, r) => {
     _mmD.copy(pos).sub(fp);
-    const x = S / 2 + _mmD.dot(_mmE) * k, y = S / 2 - _mmD.dot(_mmN) * k;
-    if (Math.abs(x - S / 2) > S / 2 - r || Math.abs(y - S / 2) > S / 2 - r) return;
+    const x = PX / 2 + _mmD.dot(_mmE) * k, y = PX / 2 - _mmD.dot(_mmN) * k;
+    if (Math.abs(x - PX / 2) > PX / 2 - r || Math.abs(y - PX / 2) > PX / 2 - r) return;
     mg.fillStyle = color;
     mg.beginPath(); mg.arc(x, y, r, 0, 7); mg.fill();
   };
@@ -1784,7 +1798,7 @@ function drawMini() {
     const d = Math.hypot(dx, dy);
     if (d > RV) { dx *= RV / d; dy *= RV / d; }
     mg.fillStyle = state.phase === 'pickup' ? '#ff5a4a' : '#38c76a';
-    mg.beginPath(); mg.arc(S / 2 + dx * k, S / 2 - dy * k, 7, 0, 7); mg.fill();
+    mg.beginPath(); mg.arc(PX / 2 + dx * k, PX / 2 - dy * k, 7, 0, 7); mg.fill();
   }
   if (!state.onBike) dot(player.position, '#ff9d2e', 4);
   for (const car of traffic) if (car.alive) dot(car.mesh.position, '#10161c', 2.5);
@@ -1792,7 +1806,7 @@ function drawMini() {
   /* 箭头：北朝上，所以按「朝向在东/北上的分量」转 */
   fFwd(fq, _mmF);
   mg.save();
-  mg.translate(S / 2, S / 2);
+  mg.translate(PX / 2, PX / 2);
   mg.rotate(Math.atan2(_mmF.dot(_mmE), _mmF.dot(_mmN)));
   mg.fillStyle = '#ffd24a';
   mg.beginPath();
@@ -1862,13 +1876,13 @@ function updatePlayer(dt) {
       th -= 1;
       st += state.escS;
     } else {
-      if (state.speed < 0.6) {
+      if (state.speed < 0.2 * S) {
         state.slowT = (state.slowT || 0) + dt;
         if (state.slowT > 0.5) { state.esc = 1.1; state.escS = Math.random() < 0.5 ? -1 : 1; state.slowT = 0; }
       } else state.slowT = 0;
       st += autoSteer(state.q);
-      const near = state.target && arcDist(player.position, state.target) < 12;
-      th += near ? (state.speed > 4 ? -1 : 0.15) : 1;
+      const near = state.target && arcDist(player.position, state.target) < 4 * S;
+      th += near ? (state.speed > 1.3 * S ? -1 : 0.15) : 1;
     }
   }
   if (keys.KeyW || keys.ArrowUp || gasOn) th += 1;
@@ -1883,19 +1897,20 @@ function updatePlayer(dt) {
 
   if (th > 0) state.speed += CFG.accel * th * dt;
   else if (th < 0) {
-    if (state.speed > 0.1) state.speed -= CFG.brake * (-th) * dt;
+    if (state.speed > 0.1 * S) state.speed -= CFG.brake * (-th) * dt;
     else state.speed -= CFG.accel * 0.5 * (-th) * dt;
   }
   state.speed -= state.speed * CFG.drag * dt;
   if (keys.Space) state.speed -= Math.sign(state.speed) * CFG.brake * 1.2 * dt;
-  state.speed = clamp(state.speed, -5, CFG.maxSpeed);
-  if (Math.abs(state.speed) < 0.05) state.speed = 0;
+  state.speed = clamp(state.speed, -5 * S, CFG.maxSpeed);
+  if (Math.abs(state.speed) < 0.05 * S) state.speed = 0;
 
-  const grip = clamp(Math.abs(state.speed) / 3.5, 0, 1);
+  /* 车速太低时轮胎「抓不住地」，转向也就打不动 */
+  const grip = clamp(Math.abs(state.speed) / (3.5 * S), 0, 1);
   turn(state.q, st * CFG.steer * dt * grip * Math.sign(state.speed || 1));
 
   const step = state.speed * dt;
-  if (!slide(state.q, _plQ, step, 0.7)) {
+  if (!slide(state.q, _plQ, step, CFG.bikeRadius)) {
     state.speed *= 0.35;
     state.hits = (state.hits || 0) + 1;
   }
@@ -1946,7 +1961,7 @@ function updateFoot(dt) {
   } else {
     mag = 0;
     foot.speed += (0 - foot.speed) * Math.min(1, dt * 12);
-    if (foot.speed < 0.05) foot.speed = 0;
+    if (foot.speed < 0.05 * S) foot.speed = 0;
   }
 
   if (jumpQueued) {
@@ -1989,17 +2004,17 @@ const camQ = new THREE.Quaternion();
 const _cUp = new THREE.Vector3(), _cDir = new THREE.Vector3();
 const _cdU = new THREE.Vector3(), _cdQ = new THREE.Quaternion();
 const INSPECT = /(\?|&)insp/.test(location.search);
-/* ?top=80 从正上方看，用来核对出生点、路面掩码、车流是不是真在马路上 */
+/* ?top=200 从正上方看，用来核对出生点、路面掩码、车流是不是真在马路上 */
 const TOPDOWN = parseFloat((location.search.match(/[?&]top=?(\d*)/) || [])[1] || 0) ||
-  (/(\?|&)top/.test(location.search) ? 80 : 0);
+  (/(\?|&)top/.test(location.search) ? 60 * S : 0);
 
 /* 镜头往后退时撞到楼就拉近一点 */
 function cameraDistance(want) {
-  for (let d = 3; d <= want; d += 0.9) {
+  for (let d = 3 * S; d <= want; d += 0.9 * S) {
     _cdQ.copy(camQ);
     turn(_cdQ, Math.PI);
     advance(_cdQ, d);
-    if (blockedDir(fUp(_cdQ, _cdU))) return Math.max(5.5, d - 0.9);
+    if (blockedDir(fUp(_cdQ, _cdU))) return Math.max(5.5 * S, d - 0.9 * S);
   }
   return want;
 }
@@ -2011,7 +2026,7 @@ function updateCamera(dt) {
   /* 骑车时镜头就在车正后方；步行时慢慢转回身后，避免和「相对镜头」操作互相带偏 */
   camQ.copy(q);
   if (!state.onBike) {
-    const rate = foot.speed > 0.3 ? 1.8 : 0.5;
+    const rate = foot.speed > 0.3 * S ? 1.8 : 0.5;
     foot.camOff += (0 - foot.camOff) * Math.min(1, dt * rate);
     turn(camQ, foot.camOff);
   }
@@ -2029,16 +2044,18 @@ function updateCamera(dt) {
 
   if (INSPECT) {
     fRight(camQ, _rt);
-    camera.position.copy(p).addScaledVector(_rt, 3.4).addScaledVector(_cUp, 1.2).addScaledVector(_cDir, 0.6);
-    camera.lookAt(lookGoal.copy(p).addScaledVector(_cUp, 0.9));
+    camera.position.copy(p).addScaledVector(_rt, 3.4 * S).addScaledVector(_cUp, 1.2 * S).addScaledVector(_cDir, 0.6 * S);
+    camera.lookAt(lookGoal.copy(p).addScaledVector(_cUp, 0.9 * S));
     return;
   }
 
-  const base = state.onBike ? 9.6 + Math.abs(state.speed) * 0.18 : 5.6 + foot.speed * 0.2;
+  /* 镜头的距离和高度也按 S 放大，屏幕上人还是那么大，但楼变小了——
+     这正是「人和车太小」要的效果。速度项不用乘 S，速度本身已经乘过了。 */
+  const base = state.onBike ? 9.6 * S + Math.abs(state.speed) * 0.18 : 5.6 * S + foot.speed * 0.2;
   const back = cameraDistance(base);
-  const high = state.onBike ? 2.6 : 1.9;
+  const high = (state.onBike ? 2.6 : 1.9) * S;
   camGoal.copy(p).addScaledVector(_cDir, -back).addScaledVector(_cUp, high + back * 0.22);
-  lookGoal.copy(p).addScaledVector(_cDir, 4.2).addScaledVector(_cUp, state.onBike ? 1.3 : 1.1);
+  lookGoal.copy(p).addScaledVector(_cDir, 4.2 * S).addScaledVector(_cUp, (state.onBike ? 1.3 : 1.1) * S);
   camera.position.lerp(camGoal, Math.min(1, dt * (state.onBike ? 6 : 7)));
   camera.lookAt(lookGoal);
 }
@@ -2052,10 +2069,12 @@ function updateMarkers(dt, time) {
   if (!state.target) return;
   const p = focusPos();
   const d = arcDist(p, state.target);
-  $('dist').textContent = Math.round(d) + ' m';
+  /* 世界是 S 倍巨人尺度，HUD 上换算回真人尺度：
+     不然一辆电动车会显示 150km/h、送一趟信要跑 900 米。 */
+  $('dist').textContent = Math.round(d / S) + ' m';
   const ang = relBearing(focusFrame(), p, state.target);
   $('arw').style.transform = `rotate(${(-ang * 180 / Math.PI)}deg)`;
-  if (d < CFG.reachRadius && Math.abs(focusSpeed()) < 6) reachTarget();
+  if (d < CFG.reachRadius && Math.abs(focusSpeed()) < 2 * S) reachTarget();
 }
 
 /* ---------- 主循环 ---------- */
@@ -2103,7 +2122,7 @@ function loop() {
   _lpN.normalize();
   _lpE.crossVectors(_lpN, _lpU).normalize();
 
-  sun.position.copy(fp).addScaledVector(_lpU, 86).addScaledVector(_lpE, 46).addScaledVector(_lpN, 38);
+  sun.position.copy(fp).addScaledVector(_lpU, 86 * S).addScaledVector(_lpE, 46 * S).addScaledVector(_lpN, 38 * S);
   sun.target.position.copy(fp);
   sky.position.copy(camera.position);
   sky.quaternion.setFromUnitVectors(YAXIS, _lpU);
@@ -2117,7 +2136,7 @@ function loop() {
       .addScaledVector(_lpU, c.h + sag);
   }
 
-  $('spd').textContent = Math.round(Math.abs(focusSpeed()) * 3.6);
+  $('spd').textContent = Math.round(Math.abs(focusSpeed()) * 3.6 / S);
   if (DEBUG) {
     if (state.odoP) state.odo = (state.odo || 0) + state.odoP.distanceTo(fp);
     else state.odoP = new THREE.Vector3();
@@ -2174,7 +2193,7 @@ async function boot() {
      945 丛地被草也跳过——它们只有巴掌大，描边看不出来，却要多一倍提交。 */
   const inked = [];
   city.traverse(o => { if (o.isMesh && !TERRAIN.test(o.name) && !/^Grass/i.test(o.name)) inked.push(o); });
-  for (const o of inked) addOutline(o, 0.015);
+  for (const o of inked) addOutline(o, 0.015 * S);
   await new Promise(r => setTimeout(r, 16));
 
   setProgress(0.7, '加载电动车…');
@@ -2186,14 +2205,14 @@ async function boot() {
   bikeMesh.castShadow = true;
   bikeMesh.receiveShadow = true;
   bikeHolder.add(bikeMesh);
-  addOutline(bikeHolder, 0.021);
+  addOutline(bikeHolder, 0.021 * S);
 
   setProgress(0.85, '加载骑手…');
   const boyRoot = await loadOne('./assets/boy-final.fbx');
   normalize(boyRoot, { height: CFG.riderHeight });
   toonify(boyRoot, { map: inkTexture(await loadTex('./assets/boy-final_basecolor.jpg'), { threshold: 0.16 }) });
   boyRoot.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
-  addOutline(boyRoot, 0.013);
+  addOutline(boyRoot, 0.013 * S);
 
   boy.pivot = new THREE.Group();
   boy.pivot.add(boyRoot);
@@ -2229,7 +2248,7 @@ async function boot() {
   boy.pivot.updateMatrixWorld(true);
   const pelvis = boyRoot.getObjectByName('Pelvis') || boyRoot.getObjectByName('Hip');
   const pelvisY = pelvis ? pelvis.getWorldPosition(new THREE.Vector3()).y : CFG.riderHeight * 0.5;
-  boy.seat.set(-0.10, bikeSize.y * 0.60 - pelvisY, 0);
+  boy.seat.set(-0.10 * S, bikeSize.y * 0.60 - pelvisY, 0);
   scene.remove(boy.pivot);
   riderHolder.add(boy.pivot);
   boy.pivot.position.copy(boy.seat);
@@ -2242,22 +2261,22 @@ async function boot() {
   updateCamera(1);                      // dt=1 让镜头一次就位，不然开局会从远处飞过来
 
   /* 星球周长 3.8 公里，邮箱要是撒满整颗星，最近的一个平均也在四百米外，
-     一趟送信得开两分钟。全都投在出生点这片街区里，最远三百米。 */
+     一趟送信得开两分钟。全都投在出生点这片街区里，最远 300 个身位。 */
   const mbQ = new THREE.Quaternion(), mbU = new THREE.Vector3();
   for (let i = 0; i < 9; i++) {
-    const q = findRoadFrame(3, state.q, 300);
+    const q = findRoadFrame(3 * S, state.q, 300 * S);
     /* 从车道往路边挪一点，落在人行道上，别站在马路正中间 */
     let ok = false;
     for (let k = 0; k < 12 && !ok; k++) {
       mbQ.copy(q);
       turn(mbQ, rand(0, Math.PI * 2));
-      advance(mbQ, rand(2.4, 4.2));
-      ok = paveDir(fUp(mbQ, mbU)) && !blockedAt(mbQ, 0.6);
+      advance(mbQ, rand(2.4 * S, 4.2 * S));
+      ok = paveDir(fUp(mbQ, mbU)) && !blockedAt(mbQ, 0.6 * S);
     }
     if (!ok) mbQ.copy(q);
     turn(mbQ, rand(0, Math.PI * 2));
     state.mailboxes.push(makeMailbox(mbQ));
-    stampOcc(mbQ, 0.5);
+    stampOcc(mbQ, 0.5 * S);
   }
 
   setProgress(0.96, '布置车流与街景…');
