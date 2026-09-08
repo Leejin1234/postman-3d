@@ -38,10 +38,10 @@ const CFG = {
   bikeRadius: 0.7 * S,          // 电动车的碰撞半径
   shadowSize: IS_MOBILE ? 1024 : 2048,
   shadowSpan: (IS_MOBILE ? 38 : 52) * S,
-  /* 星球半径只有 600 米，地平线在两三百米外就收口了，雾也要跟着收紧，
-     否则远处物体是「突然出现」而不是「从雾里浮出来」。
-     雾的远端要压在 VIEW_ARC 附近，正好盖住高楼被剔除时的那一下跳变。 */
-  fog: IS_MOBILE ? [120, 250] : [160, 285],
+  /* 雾要淡、要远：近端往外推，远处的楼才不会一上来就被刷白。
+     但远端必须压在 VIEW_ARC 之内（雾把剔除那一下跳变盖住），
+     所以放雾必须连着放 VIEW_ARC，两个值一起改。 */
+  fog: IS_MOBILE ? [230, 430] : [320, 560],
   maxDpr: IS_MOBILE ? 1.6 : 2
 };
 
@@ -1228,7 +1228,12 @@ function stampOcc(q, r) {
    眼高 e 时地平线在 acos(R/(R+e)) 角距处，高 H 的物体自己还能再露出 acos(R/(R+H))，
    两者相加就是它有可能被看到的最大角距。每帧只要一个点积，比多画一千次便宜得多。 */
 const EYE = 15;
-const VIEW_ARC = 290;              // 再远的东西已经被雾吃掉了，不必再画
+/* 可见弧长：楼要「早点出现」就得把它放大，代价是提交数按弧长平方涨。
+   手机档留一档余量。它必须 >= 雾的远端，否则楼会在雾外面被硬切掉。 */
+const VIEW_ARC = IS_MOBILE ? 450 : 580;
+/* 描边壳只在近处画：壳厚 0.045 单位，100 单位外还不到半个像素，
+   却要多一次提交。远处的楼只画本体，省下的正好抵掉看得更远多出来的开销。 */
+const ARC_LINE = 150;
 const horizon = [];
 const _hzC = new THREE.Vector3(), _hzB = new THREE.Box3(), _hzP = new THREE.Vector3();
 function prepareHorizon(root) {
@@ -1249,7 +1254,12 @@ function prepareHorizon(root) {
     }
     const H = Math.max(0.5, top - PLANET.R);
     const ang = eyeAng + Math.acos(clamp(PLANET.R / (PLANET.R + H), -1, 1)) + 0.03;
-    horizon.push({ o, d: _hzC.clone().normalize(), lim: Math.cos(Math.min(ang, maxAng)) });
+    horizon.push({
+      o, d: _hzC.clone().normalize(),
+      lim: Math.cos(Math.min(ang, maxAng)),
+      shell: o.children.find(c => c.userData.__outline) || null,
+      limS: Math.cos(Math.min(ang, ARC_LINE / PLANET.R))
+    });
   });
 }
 
@@ -1258,8 +1268,10 @@ function horizonCull(q) {
   fUp(q, _hzU);
   let on = 0;
   for (const e of horizon) {
-    const v = e.d.dot(_hzU) >= e.lim;
+    const dot = e.d.dot(_hzU);
+    const v = dot >= e.lim;
     e.o.visible = v;
+    if (e.shell) e.shell.visible = v && dot >= e.limS;
     if (v) on++;
   }
   state.hzOn = on;
@@ -2224,7 +2236,6 @@ async function boot() {
 
   setProgress(0.6, '计算碰撞地图…');
   bakeOcc(city);
-  prepareHorizon(city);
   buildMiniImage();
   await new Promise(r => setTimeout(r, 16));
 
@@ -2234,6 +2245,8 @@ async function boot() {
   const inked = [];
   city.traverse(o => { if (o.isMesh && !TERRAIN.test(o.name) && !/^Grass/i.test(o.name)) inked.push(o); });
   for (const o of inked) addOutline(o, 0.015 * S);
+  /* 地平线剔除要在描边之后建表：它顺手记下每个物体的描边壳，好按距离单独关掉 */
+  prepareHorizon(city);
   await new Promise(r => setTimeout(r, 16));
 
   setProgress(0.7, '加载电动车…');
