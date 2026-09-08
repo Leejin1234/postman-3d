@@ -2186,9 +2186,17 @@ async function boot() {
   const dd = dedupeGeometries(city);
   state.geoUnique = dd.unique;
   toonify(city, { palette: true, castShadow: !IS_MOBILE });
-  /* 地表（球壳 + 路面）不投影：球壳一个面 29 单位宽、阴影图一个像素 0.15 单位，
-     它给自己投影只会投出一片一片的脏斑（shadow acne），楼和树投影就够了。 */
-  city.traverse(o => { if (o.isMesh && TERRAIN.test(o.name)) o.castShadow = false; });
+  /* 地表要单独处理两件事：
+     一是 Roads 那层里有一半三角形绕序朝内（法线也跟着朝内，是模型自带的毛病），
+     单面渲染会把它们整片剔掉，路面就一条条露出下面 2 米处的草地，看着像镂空破洞，
+     所以地表整层改双面渲染，把被剔掉的那一半补回来；
+     二是地表不投影——球壳一个面 29 单位宽、阴影图一像素 0.15 单位，
+     自投影只会在地上糊出一片片脏斑（shadow acne），楼和树投影就够了。 */
+  city.traverse(o => {
+    if (!o.isMesh || !TERRAIN.test(o.name)) return;
+    o.castShadow = false;
+    for (const m of (Array.isArray(o.material) ? o.material : [o.material])) m.side = THREE.DoubleSide;
+  });
   /* ?mat：地表按材质刷成纯色，天空藏起来、背景刷洋红。
      地上要是真有洞，洞里会是洋红；黑斑其实是路面的话，就会变成红色。 */
   if (/(\?|&)mat/.test(location.search)) {
