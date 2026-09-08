@@ -9,8 +9,6 @@ const AUTO = /(\?|&)auto/.test(location.search);
 const SELFTEST = /(\?|&)selftest/.test(location.search);
 
 const CFG = {
-  citySpan: 300,
-  streetWidth: 22,
   bikeLen: 1.95,
   riderHeight: 1.72,
   maxSpeed: 17,
@@ -28,7 +26,9 @@ const CFG = {
   mountRange: 3.4,
   shadowSize: IS_MOBILE ? 1024 : 2048,
   shadowSpan: IS_MOBILE ? 38 : 52,
-  fog: IS_MOBILE ? [140, 340] : [190, 480],
+  /* 星球半径只有 600 米，地平线在百来米外就收口了，雾也要跟着收紧，
+     否则远处物体是「突然出现」而不是「从雾里浮出来」 */
+  fog: IS_MOBILE ? [70, 210] : [90, 260],
   maxDpr: IS_MOBILE ? 1.6 : 2
 };
 
@@ -39,15 +39,17 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const state = {
   coin: 0, parcel: 0, lv: 1, xp: 0, xpMax: 100,
   phase: 'pickup', target: null, mailboxes: [],
-  speed: 0, heading: 0, tris: 0,
-  onBike: true, camYaw: 0
+  speed: 0, tris: 0,
+  onBike: true,
+  /* 骑手所在的球面 frame（位置 + 朝向合一），以及镜头相对朝向的偏角 */
+  q: new THREE.Quaternion(), camOff: 0
 };
 
 /* ---------- renderer / scene ---------- */
 const canvas = $('gl');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !IS_MOBILE, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, CFG.maxDpr));
-renderer.shadowMap.enabled = true;
+renderer.shadowMap.enabled = !/(\?|&)noshadow/.test(location.search);
 renderer.shadowMap.type = IS_MOBILE ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
@@ -98,15 +100,18 @@ function cloudTexture() {
   return t;
 }
 const cloudTex = cloudTexture();
+/* 云的位置每帧在玩家脚下的切平面里重算，这里只存「东/北向偏移 + 高度」 */
 const clouds = [];
 for (let i = 0; i < (IS_MOBILE ? 12 : 20); i++) {
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.9, fog: false, depthWrite: false }));
-  const a = Math.random() * Math.PI * 2, r = 150 + Math.random() * 200;
-  sp.position.set(Math.cos(a) * r, 48 + Math.random() * 80, Math.sin(a) * r);
   const s = 70 + Math.random() * 90;
   sp.scale.set(s, s * 0.46, 1);
   scene.add(sp);
-  clouds.push({ sp, spd: 1.1 + Math.random() * 1.5 });
+  clouds.push({
+    sp,
+    u: rand(-300, 300), v: rand(-260, 260), h: 48 + Math.random() * 80,
+    spd: 1.1 + Math.random() * 1.5
+  });
 }
 
 scene.add(new THREE.HemisphereLight(0xcce6f8, 0xb4b79c, 0.46));
@@ -155,20 +160,45 @@ function pastel(m) {
   return m;
 }
 
+/* 同一个源材质只转换一次：星球城市有 3000 多个 mesh，每个都新建一份
+   MeshToonMaterial 会编译出几千个 program、拖垮启动。
+   palette 模式针对「一格一个纯色」的调色板图集：必须用 NearestFilter，
+   线性插值会把相邻色格糊在一起，模型上会出现莫名的杂色条纹。 */
+const toonCache = new Map();
+function toonMat(m, opts) {
+  const src = opts.map || (m && m.map) || null;
+  const key = (m ? m.uuid : '-') + '|' + (src ? src.uuid : '-') + (opts.palette ? '|p' : '');
+  let out = toonCache.get(key);
+  if (out) return out;
+  if (src) {
+    src.colorSpace = THREE.SRGBColorSpace;
+    if (opts.palette) {
+      src.magFilter = src.minFilter = THREE.NearestFilter;
+      src.generateMipmaps = false;
+      src.anisotropy = 1;
+    } else {
+      src.anisotropy = IS_MOBILE ? 2 : 4;
+    }
+    src.needsUpdate = true;
+  }
+  out = pastel(new THREE.MeshToonMaterial({
+    name: (m && m.name) || '',
+    /* 有贴图的（Bld / Street / 树石草）颜色全在调色板图上，底色刷白；
+       没贴图的（City_Road / City_Grass / City_Curb…）颜色只存在 material.color 里，
+       刷白就会变成一整片惨白的地面，必须原样保留。 */
+    color: src ? 0xffffff : (m && m.color ? m.color.getHex() : 0xffffff),
+    map: src,
+    gradientMap: GRAD
+  }));
+  toonCache.set(key, out);
+  return out;
+}
+
 function toonify(root, opts = {}) {
   root.traverse(o => {
     if (!o.isMesh) return;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
-    const out = mats.map(m => {
-      const map = (opts.map || (m && m.map)) || null;
-      if (map) { map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = IS_MOBILE ? 2 : 4; }
-      return pastel(new THREE.MeshToonMaterial({
-        name: (m && m.name) || '',
-        color: 0xffffff,
-        map,
-        gradientMap: GRAD
-      }));
-    });
+    const out = mats.map(m => toonMat(m, opts));
     o.material = out.length === 1 ? out[0] : out;
     o.castShadow = opts.castShadow !== false;
     o.receiveShadow = true;
@@ -305,57 +335,60 @@ function carGeo(paintHex, taxi) {
   return g;
 }
 
-/* ---------- 高度图占用标记（静态障碍物） ---------- */
-function stampOcc(x, z, r) {
-  if (!HM.occ) return;
-  const cx0 = clamp(Math.floor((x - r - HM.minX) / HM.cell), 0, HM.w - 1);
-  const cx1 = clamp(Math.floor((x + r - HM.minX) / HM.cell), 0, HM.w - 1);
-  const cz0 = clamp(Math.floor((z - r - HM.minZ) / HM.cell), 0, HM.h - 1);
-  const cz1 = clamp(Math.floor((z + r - HM.minZ) / HM.cell), 0, HM.h - 1);
-  for (let cz = cz0; cz <= cz1; cz++) for (let cx = cx0; cx <= cx1; cx++) HM.occ[cz * HM.w + cx] = 1;
-}
-function dirClear(x, z, h, dist, r = 1.05) {
-  const fx = Math.sin(h), fz = Math.cos(h);
-  for (let d = 2; d <= dist; d += 1.6) if (blockedAt(x + fx * d, z + fz * d, r)) return false;
-  return true;
-}
-/* 最近墙面方向与距离（用于贴边停车 / 种树） */
-function wallProbe(p) {
+/* ---------- 最近墙面方向与距离（贴边停车用） ---------- */
+const _wpQ = new THREE.Quaternion();
+function wallProbe(q) {
   let best = null;
-  for (const h of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
-    const fx = Math.sin(h), fz = Math.cos(h);
+  for (let i = 0; i < 4; i++) {
+    const ang = i * Math.PI / 2;
     let d = 7;
-    for (let t = 1.2; t < 7; t += 0.7) if (blockedAt(p.x + fx * t, p.z + fz * t, 0.5)) { d = t; break; }
-    if (!best || d < best.d) best = { h, d, fx, fz };
+    for (let t = 1.2; t < 7; t += 0.7) {
+      _wpQ.copy(q);
+      turn(_wpQ, ang);
+      advance(_wpQ, t);
+      if (blockedAt(_wpQ, 0.5)) { d = t; break; }
+    }
+    if (!best || d < best.d) best = { ang, d };
   }
   return best;
+}
+
+/* frame -> 世界矩阵（把道具几何体烘到球面上） */
+const _fmP = new THREE.Vector3(), _fmS = new THREE.Vector3(1, 1, 1);
+function frameMatrix(q, h, out) {
+  framePos(q, h, _fmP);
+  return out.compose(_fmP, q, _fmS);
 }
 
 /* ---------- 路边停靠车辆（合并成一个静态网格） ---------- */
 function placeParked(n) {
   const geos = [], placed = [];
-  for (let i = 0, tries = 0; i < n && tries < n * 12; tries++) {
-    const p = findRoadPoint(2.2);
-    const w = wallProbe(p);
+  const q = new THREE.Quaternion(), back = new THREE.Quaternion();
+  const m = new THREE.Matrix4(), pos = new THREE.Vector3();
+  for (let i = 0, tries = 0; i < n && tries < n * 14; tries++) {
+    /* 只停在出生点这片街区，撒满整颗星球的话一辆也看不见 */
+    const road = findRoadFrame(2.2, state.q, 320);
+    const w = wallProbe(road);
     if (!w || w.d < 3.4 || w.d > 5.6) continue;
-    const cx = p.x + w.fx * (w.d - 2.6), cz = p.z + w.fz * (w.d - 2.6);
-    if (Math.abs(heightAt(cx, cz)) > 0.08) continue;
-    const h = w.h + Math.PI / 2;
-    if (!dirClear(cx, cz, h, 3.4, 1.1) || !dirClear(cx, cz, h + Math.PI, 3.4, 1.1)) continue;
-    const fx = Math.sin(h), fz = Math.cos(h);
-    if (Math.abs(heightAt(cx + fx * 1.4, cz + fz * 1.4)) > 0.08 ||
-        Math.abs(heightAt(cx - fx * 1.4, cz - fz * 1.4)) > 0.08) continue;
-    if (placed.some(q => Math.hypot(q[0] - cx, q[1] - cz) < 6)) continue;
-    if (state.mailboxes.some(m => Math.hypot(m.position.x - cx, m.position.z - cz) < 4)) continue;
-    placed.push([cx, cz]);
+    /* 先朝墙那侧挪过去，再转 90° 让车身与街道平行 */
+    q.copy(road);
+    turn(q, w.ang);
+    advance(q, w.d - 2.6);
+    turn(q, Math.PI / 2);
+    if (Math.random() < 0.5) turn(q, Math.PI);
+    if (!onFlatRoad(q)) continue;
+    back.copy(q);
+    turn(back, Math.PI);
+    if (!dirClear(q, 3.4, 1.1) || !dirClear(back, 3.4, 1.1)) continue;
+    framePos(q, 0, pos);
+    if (placed.some(p => p.distanceTo(pos) < 6)) continue;
+    if (state.mailboxes.some(mb => mb.position.distanceTo(pos) < 4)) continue;
+    placed.push(pos.clone());
     const taxi = Math.random() < 0.25;
     const g = carGeo(taxi ? 0xffc63a : CAR_PAINTS[(Math.random() * CAR_PAINTS.length) | 0], taxi).clone();
-    g.rotateY(h + (Math.random() < 0.5 ? Math.PI : 0));
-    g.translate(cx, 0, cz);
+    g.applyMatrix4(frameMatrix(q, 0, m));
     geos.push(g);
-    stampOcc(cx + fx * 1.2, cz + fz * 1.2, 0.85);
-    stampOcc(cx - fx * 1.2, cz - fz * 1.2, 0.85);
-    stampOcc(cx, cz, 0.85);
+    stampOcc(q, 1.1);
     i++;
   }
   if (!geos.length) return;
@@ -366,58 +399,35 @@ function placeParked(n) {
   scene.add(mesh);
 }
 
-/* ---------- 樱花树（合并成一个静态网格） ---------- */
-function sakuraGeo(scale) {
-  const parts = [pcyl(0.09, 0.14, 1.5, 7, 0, 0.75, 0, 0x8a6642)];
-  const blobs = [[0, 1.95, 0, 0.85], [0.5, 1.6, 0.2, 0.55], [-0.45, 1.68, -0.15, 0.5]];
-  const pinks = [0xf7a8c4, 0xf9b8d0, 0xf498b8];
-  blobs.forEach((b, i) => parts.push(psphere(b[3], b[0], b[1], b[2], pinks[i % 3], 0.9)));
-  const g = mergeParts(parts);
-  g.scale(scale, scale, scale);
-  return g;
-}
-function placeSakura(n) {
-  const geos = [];
-  for (let i = 0, tries = 0; i < n && tries < n * 15; tries++) {
-    const p = findRoadPoint(2.0);
-    const w = wallProbe(p);
-    if (!w || w.d < 2.2) continue;
-    const tx = p.x + w.fx * (w.d - 1.1), tz = p.z + w.fz * (w.d - 1.1);
-    const th = heightAt(tx, tz);
-    if (th > 0.6 || th < -0.4) continue;
-    if (state.mailboxes.some(m => Math.hypot(m.position.x - tx, m.position.z - tz) < 3)) continue;
-    const g = sakuraGeo(rand(0.85, 1.35));
-    g.rotateY(rand(0, 6.28));
-    g.translate(tx, Math.max(0, th), tz);
-    geos.push(g);
-    stampOcc(tx, tz, 0.4);
-    i++;
-  }
-  if (!geos.length) return;
-  const mesh = new THREE.Mesh(mergeParts(geos), VC_MAT);
-  mesh.castShadow = true;
-  addOutline(mesh, 0.015);
-  scene.add(mesh);
-}
-
 /* ---------- 路上车流 ---------- */
 const traffic = [];
 const CAR_SPEED = 6.5;
-function spawnCar(c, near) {
+const _scPos = new THREE.Vector3(), _scNear = new THREE.Vector3();
+function spawnCar(c, nearQ) {
+  if (nearQ) framePos(nearQ, 0, _scNear);
   for (let i = 0; i < 30; i++) {
-    const p = findRoadPoint(2.4, near, near ? 95 : 0);
-    if (near && Math.hypot(p.x - near.x, p.z - near.z) < 14) continue;
-    const hs = [0, Math.PI / 2, Math.PI, -Math.PI / 2].sort(() => Math.random() - 0.5);
-    const h = hs.find(h => dirClear(p.x, p.z, h, 12));
-    if (h === undefined) continue;
-    if (traffic.some(o => o !== c && Math.hypot(o.x - p.x, o.z - p.z) < 7)) continue;
-    c.x = p.x; c.z = p.z; c.h = h; c.v = 0; c.stuck = 0;
-    c.mesh.position.set(p.x, 0, p.z);
-    c.mesh.rotation.y = h;
+    const q = findRoadFrame(2.4, nearQ, nearQ ? 95 : 0);
+    framePos(q, 0, _scPos);
+    if (nearQ && _scPos.distanceTo(_scNear) < 14) continue;
+    /* 找一个能往前开一段的朝向 */
+    let ok = false;
+    for (let k = 0; k < 4; k++) {
+      if (dirClear(q, 12)) { ok = true; break; }
+      turn(q, Math.PI / 2);
+    }
+    if (!ok) continue;
+    if (traffic.some(o => o !== c && o.alive && o.mesh.position.distanceTo(_scPos) < 7)) continue;
+    c.q.copy(q);
+    c.v = 0;
+    c.stuck = 0;
+    c.alive = true;
+    c.mesh.position.copy(_scPos);
+    c.mesh.quaternion.copy(q);
+    c.mesh.visible = true;
     return;
   }
-  c.x = 0; c.z = 0; c.v = 0;
-  c.mesh.position.set(0, -50, 0);
+  c.alive = false;
+  c.mesh.visible = false;
 }
 function initTraffic(n) {
   for (let i = 0; i < n; i++) {
@@ -427,57 +437,83 @@ function initTraffic(n) {
     mesh.castShadow = true;
     addOutline(mesh, 0.015);
     scene.add(mesh);
-    const c = { mesh, x: 0, z: 0, h: 0, v: 0, stuck: 0 };
+    const c = { mesh, q: new THREE.Quaternion(), v: 0, stuck: 0, alive: false };
     traffic.push(c);
-    spawnCar(c, player.position);
+    spawnCar(c, state.q);
   }
 }
+
+/* 把某个 frame 沿切平面推离一个点，朝向不变（撞车时顶开玩家） */
+const _paP = new THREE.Vector3(), _paD = new THREE.Vector3(), _paU = new THREE.Vector3();
+const _paF = new THREE.Vector3(), _paC = new THREE.Vector3();
+function pushAway(q, fromPos, amount) {
+  framePos(q, 0, _paP);
+  _paD.copy(_paP).sub(fromPos);
+  fUp(q, _paU);
+  _paD.addScaledVector(_paU, -_paD.dot(_paU));
+  if (_paD.lengthSq() < 1e-8) return;
+  _paD.normalize();
+  const ang = Math.atan2(_paC.crossVectors(fFwd(q, _paF), _paD).dot(_paU), _paF.dot(_paD));
+  turn(q, ang);
+  advance(q, amount);
+  turn(q, -ang);
+}
+
+const _tq1 = new THREE.Quaternion(), _tq2 = new THREE.Quaternion();
+const _tFwd = new THREE.Vector3(), _tD = new THREE.Vector3();
 function updateTraffic(dt) {
-  const fp = focusPos();
-  const px = fp.x, pz = fp.z;
+  const fq = focusFrame(), fp = focusPos();
   for (const c of traffic) {
-    if (c.mesh.position.y < -10) continue;
-    const fx = Math.sin(c.h), fz = Math.cos(c.h);
+    if (!c.alive) continue;
     let want = CAR_SPEED;
-    if (!dirClear(c.x, c.z, c.h, 5.2)) {
-      const l = c.h + Math.PI / 2, r = c.h - Math.PI / 2;
-      if (dirClear(c.x, c.z, l, 8)) c.h = l;
-      else if (dirClear(c.x, c.z, r, 8)) c.h = r;
+    if (!dirClear(c.q, 5.2)) {
+      _tq1.copy(c.q); turn(_tq1, Math.PI / 2);
+      _tq2.copy(c.q); turn(_tq2, -Math.PI / 2);
+      if (dirClear(_tq1, 8)) c.q.copy(_tq1);
+      else if (dirClear(_tq2, 8)) c.q.copy(_tq2);
       else want = 0;
     } else if (Math.random() < dt * 0.25) {
-      const t = Math.random() < 0.5 ? c.h + Math.PI / 2 : c.h - Math.PI / 2;
-      if (dirClear(c.x, c.z, t, 9)) c.h = t;
+      _tq1.copy(c.q);
+      turn(_tq1, Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2);
+      if (dirClear(_tq1, 9)) c.q.copy(_tq1);
     }
+
+    const cp = c.mesh.position;
+    fFwd(c.q, _tFwd);
     for (const o of traffic) {
-      if (o === c || o.mesh.position.y < -10) continue;
-      const dx = o.x - c.x, dz = o.z - c.z;
-      if (dx * fx + dz * fz > 0.5 && dx * dx + dz * dz < 16) { want = 0; break; }
+      if (o === c || !o.alive) continue;
+      _tD.copy(o.mesh.position).sub(cp);
+      if (_tD.dot(_tFwd) > 0.5 && _tD.lengthSq() < 16) { want = 0; break; }
     }
-    const pdx = px - c.x, pdz = pz - c.z;
-    if (pdx * fx + pdz * fz > 0.3 && pdx * pdx + pdz * pdz < 14) want = 0;
+    _tD.copy(fp).sub(cp);
+    if (_tD.dot(_tFwd) > 0.3 && _tD.lengthSq() < 14) want = 0;
+
     c.v += clamp(want - c.v, -9 * dt, 2.5 * dt);
-    const nx = c.x + fx * c.v * dt, nz = c.z + fz * c.v * dt;
-    if (c.v > 0.05 && !blockedAt(nx + fx * 1.9, nz + fz * 1.9, 0.95)) {
-      c.x = nx; c.z = nz; c.stuck = 0;
-    } else if (c.v > 0.05) {
-      c.v = 0; c.stuck += dt;
-      if (c.stuck > 2.5) { spawnCar(c, fp); continue; }
+    if (c.v > 0.05) {
+      _tq1.copy(c.q);
+      advance(_tq1, c.v * dt);
+      _tq2.copy(_tq1);
+      advance(_tq2, 1.9);
+      if (!blockedAt(_tq2, 0.95)) { c.q.copy(_tq1); c.stuck = 0; }
+      else {
+        c.v = 0;
+        c.stuck += dt;
+        if (c.stuck > 2.5) { spawnCar(c, fq); continue; }
+      }
     }
-    c.mesh.position.set(c.x, 0, c.z);
-    const dy = Math.atan2(Math.sin(c.h - c.mesh.rotation.y), Math.cos(c.h - c.mesh.rotation.y));
-    c.mesh.rotation.y += dy * Math.min(1, dt * 7);
-    const ddx = px - c.x, ddz = pz - c.z, dd = Math.hypot(ddx, ddz);
+    framePos(c.q, 0, cp);
+    c.mesh.quaternion.slerp(c.q, Math.min(1, dt * 7));
+
+    const dd = cp.distanceTo(fp);
     if (dd < 2.1 && dd > 0.01) {
-      const target = state.onBike ? player.position : walker.position;
-      target.x += ddx / dd * (2.1 - dd);
-      target.z += ddz / dd * (2.1 - dd);
+      pushAway(fq, cp, 2.1 - dd);
       if (state.onBike) state.speed *= 0.3; else foot.speed *= 0.3;
       if (!state.bumpT || clock.elapsedTime - state.bumpT > 2) {
         state.bumpT = clock.elapsedTime;
         toast('小心车辆！');
       }
     }
-    if (dd > 115) spawnCar(c, fp);
+    if (dd > 115) spawnCar(c, fq);
   }
 }
 
@@ -515,13 +551,13 @@ function coinPop(gain) {
 }
 
 /* ---------- loading ----------
-   城市模型 29.6MB 且 GitHub Pages 不给 .fbx 做 gzip（实测 gzip 只能压到 91%，
-   里面是浮点顶点数据、本来就没冗余），所以省流量这条路走不通，只能：
+   星球城市模型 8.6MB，加上骑手 / 电动车贴图一共约 16MB，GitHub Pages 不给
+   .fbx 和 .jpg 做有效压缩（里面是浮点顶点和已压缩的图），省流量这条路走不通，只能：
      1. 存到 Cache Storage —— 首次下完之后再进游戏是秒开，断网也能玩
      2. 下载失败退避重试 —— 手机弱网下断一次不至于整局白费              */
 const loader = new FBXLoader();
 
-const CACHE_NAME = 'postman-assets-v4';
+const CACHE_NAME = 'postman-assets-v5';
 const NOCACHE = /(\?|&)nocache/.test(location.search);
 let assetCache;
 
@@ -734,295 +770,616 @@ function flatten(root) {
   return { geometry, material };
 }
 
-/* ---------- 城市合批：同贴图 + 空间分块（便于视锥剔除） ---------- */
-const TILE = 46;
-function mergeCity(root) {
-  root.updateMatrixWorld(true);
-  const groups = new Map();
-  const c = new THREE.Vector3();
+/* ---------- 几何体去重 ----------
+   FBX 把每栋楼、每棵树都导成独立 mesh，但它们大多共用同一份网格。
+   按「顶点数 + 抽样顶点」做指纹，重复的直接指向同一个 BufferGeometry。
+   3007 个物体只剩 201 份几何体，显存从 200MB+ 掉到十几 MB。
+   注意不能合批：球面上视野被地平线挡住，逐物体视锥剔除比合批更划算。 */
+function dedupeGeometries(root) {
+  const map = new Map();
+  let saved = 0, total = 0;
   root.traverse(o => {
-    if (!o.isMesh || !o.geometry || o.userData.__outline) return;
-    const mats = Array.isArray(o.material) ? o.material : [o.material];
-    if (mats.length !== 1 || !mats[0]) return;
-    const mat = mats[0];
-    const g = o.geometry.clone();
-    for (const k in g.attributes) if (k !== 'position' && k !== 'normal' && k !== 'uv') g.deleteAttribute(k);
-    g.morphAttributes = {};
-    if (!g.attributes.position || !g.attributes.normal || !g.attributes.uv) return;
-    g.applyMatrix4(o.matrixWorld);
-    g.computeBoundingBox();
-    g.boundingBox.getCenter(c);
-    const key = (mat.map ? mat.map.uuid : 'none') + '|' + mat.color.getHexString() +
-      '|' + Math.floor(c.x / TILE) + '_' + Math.floor(c.z / TILE);
-    let bucket = groups.get(key);
-    if (!bucket) groups.set(key, bucket = { mat, geos: [], src: [] });
-    bucket.geos.push(g.index ? g.toNonIndexed() : g);
-    bucket.src.push(o);
+    if (!o.isMesh || !o.geometry) return;
+    const g = o.geometry, p = g.attributes.position;
+    if (!p || !p.count) return;
+    total++;
+    let h = p.count + ':' + (g.index ? g.index.count : 0);
+    const S = 12;
+    for (let i = 0; i < S; i++) {
+      const j = Math.floor(i * (p.count - 1) / (S - 1));
+      h += '|' + p.getX(j).toFixed(3) + ',' + p.getY(j).toFixed(3) + ',' + p.getZ(j).toFixed(3);
+    }
+    const hit = map.get(h);
+    if (!hit) map.set(h, g);
+    /* 这里不要 dispose 重复的几何体：它们还没上传过 GPU，
+       但 three.js 的 dispose 事件照样会把 info.memory.geometries 减一，
+       几千次之后计数变成负数，性能面板就再也读不准了。丢掉引用交给 GC 就行。 */
+    else if (hit !== g) { o.geometry = hit; saved++; }
   });
-  const merged = new THREE.Group();
-  merged.name = 'city-merged';
-  let ok = 0;
-  groups.forEach(bucket => {
-    let g = null;
-    try { g = BufferGeometryUtils.mergeGeometries(bucket.geos, false); } catch (e) { g = null; }
-    if (!g) { bucket.geos.forEach(x => x.dispose()); return; }
-    g.computeBoundingSphere();
-    const mesh = new THREE.Mesh(g, bucket.mat);
-    mesh.name = 'city_' + ok;
-    mesh.castShadow = !IS_MOBILE;
-    mesh.receiveShadow = true;
-    merged.add(mesh);
-    bucket.src.forEach(o => o.parent && o.parent.remove(o));
-    ok++;
-  });
-  return ok ? merged : null;
+  return { unique: map.size, saved, total };
 }
 
-/* ---------- 高度图（碰撞 / 可行驶区域 / 小地图） ---------- */
-const HM = { cell: 0.8, w: 0, h: 0, minX: 0, minZ: 0, data: null, occ: null, img: null };
 
-/* 第二遍：只把"楼房墙体"记为碰撞——需同时满足
-   1) 在离地 2.6~6（按街宽换算的单位）高度带内有成片实体面
-   2) 该格最高点确实是楼房高度
-   于是马路上的汽车/卡车/护栏/灯杆/招牌以及高架桥面都不再挡路。 */
-function buildCollision(root) {
-  const BAND0 = 2.5, BAND1 = 5.0, TALL = 4.5, MINFOOT = 0.6;
-  const occ = new Uint8Array(HM.w * HM.h);
-  const v = new THREE.Vector3();
-  root.updateMatrixWorld(true);
-  root.traverse(o => {
-    if (!o.isMesh || !o.geometry || o.userData.__outline) return;
-    const pos = o.geometry.attributes.position;
-    const idx = o.geometry.index;
-    const m = o.matrixWorld;
-    const count = idx ? idx.count : pos.count;
-    for (let i = 0; i + 2 < count; i += 3) {
-      let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
-      let ymin = Infinity, ymax = -Infinity;
-      for (let k = 0; k < 3; k++) {
-        const vi = idx ? idx.getX(i + k) : i + k;
-        v.fromBufferAttribute(pos, vi).applyMatrix4(m);
-        if (v.x < x0) x0 = v.x;
-        if (v.x > x1) x1 = v.x;
-        if (v.z < z0) z0 = v.z;
-        if (v.z > z1) z1 = v.z;
-        if (v.y < ymin) ymin = v.y;
-        if (v.y > ymax) ymax = v.y;
-      }
-      if (ymax < BAND0 || ymin > BAND1) continue;
-      if (Math.max(x1 - x0, z1 - z0) < MINFOOT) continue;
-      const cx0 = clamp(Math.floor((x0 - HM.minX) / HM.cell), 0, HM.w - 1);
-      const cx1 = clamp(Math.floor((x1 - HM.minX) / HM.cell), 0, HM.w - 1);
-      const cz0 = clamp(Math.floor((z0 - HM.minZ) / HM.cell), 0, HM.h - 1);
-      const cz1 = clamp(Math.floor((z1 - HM.minZ) / HM.cell), 0, HM.h - 1);
-      for (let cz = cz0; cz <= cz1; cz++) {
-        const row = cz * HM.w;
-        for (let cx = cx0; cx <= cx1; cx++) if (HM.data[row + cx] > TALL) occ[row + cx] = 1;
-      }
-    }
-  });
-  // 只保留成片墙体，去掉零散单元
-  const out = new Uint8Array(occ.length);
-  let n1 = 0;
-  for (let cz = 1; cz < HM.h - 1; cz++) {
-    for (let cx = 1; cx < HM.w - 1; cx++) {
-      const i = cz * HM.w + cx;
-      if (!occ[i]) continue;
-      let n = 0;
-      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) n += occ[i + dz * HM.w + dx];
-      if (n >= 5) { out[i] = 1; n1++; }
+/* ---------- 星球坐标系 ----------
+   城市贴在一个半径约 600 的球面上，原来那套「XZ 平面 + Y 朝上」全部失效。
+   这里把「站在哪」和「朝哪」合并成一个四元数 frame：
+       up    = frame · (0,1,0)   本地朝天
+       fwd   = frame · (0,0,1)   本地朝前
+       right = frame · (1,0,0)
+   世界坐标 = 球心 + up * (地表半径 + 离地高度)
+   前进 d 米 = 绕 right 轴转 d/R（即沿大圆走）；转向 = 绕本地 up 轴转。
+   位置和朝向共用同一个量，永远自洽，也不会像「经纬度 + 航向角」那样在极点退化。
+   顺带一个好处：模型容器的 rotation.y=-π/2（把朝 +X 的模型转成朝 +Z）这类
+   本地修正全都不用动，因为 frame 的本地轴语义和原来完全一致。 */
+const PLANET = { C: new THREE.Vector3(), R: 600 };
+const YAXIS = new THREE.Vector3(0, 1, 0);
+
+/* 哪些网格算地形（可以走上去），哪些算障碍（撞不过去）。
+   模型的命名很规整：Planet 球壳 / Roads 整张路网 /
+   Bld_* 楼 / Tree_* 树 / Rock_* 石头 / Grass_* 地被草 / Street_* 路灯。
+   Street_* 是 336 根路灯（单个 7.7×28.8×6.2），当初误当成地形，
+   结果它们既不参与地平线剔除、又一直全部提交绘制，白白多出 600 多次 draw call。
+   草是贴地装饰，既不当地形也不挡路，直接开过去。 */
+const TERRAIN = /^(Planet|Roads)/i;
+const BLOCKING = /^(Bld|Tree|Rock|Street)/i;
+
+/* 地表半径场 + 障碍占用图，都存成等距圆柱（经纬）网格。
+   ground 存浮点半径，地形是低频的，格子粗一点够用；
+   occ 是 1 字节挡路标记，必须细，不然贴着楼角走会穿墙。 */
+const GRID = { gw: 1280, gh: 640, ground: null, ow: 3072, oh: 1536, occ: null, surf: null, img: null };
+const M_DRIVE = 1, M_PAVE = 2;   // surf 的两个标记位：车道 / 人行道+路缘
+
+/* 方向 -> 网格下标。d 必须是单位向量（要用 d.y 求极角）。 */
+function cellOf(d, w, h) {
+  let cu = Math.floor((Math.atan2(d.x, d.z) / (Math.PI * 2) + 0.5) * w);
+  let cv = Math.floor(Math.acos(clamp(d.y, -1, 1)) / Math.PI * h);
+  if (cu < 0) cu += w; else if (cu >= w) cu -= w;
+  if (cv < 0) cv = 0; else if (cv >= h) cv = h - 1;
+  return cv * w + cu;
+}
+function groundR(dir) {
+  return GRID.ground ? GRID.ground[cellOf(dir, GRID.gw, GRID.gh)] : PLANET.R;
+}
+function blockedDir(dir) {
+  return GRID.occ ? GRID.occ[cellOf(dir, GRID.ow, GRID.oh)] === 1 : false;
+}
+/* 是不是车道（电动车、车流、出生点只认这个）。没烘出掩码时一律当成是。 */
+function driveDir(dir) {
+  return GRID.surf ? (GRID.surf[cellOf(dir, GRID.ow, GRID.oh)] & M_DRIVE) !== 0 : true;
+}
+/* 车道 + 人行道 + 路缘：邮箱、停靠车辆、步行可以用 */
+function paveDir(dir) {
+  return GRID.surf ? GRID.surf[cellOf(dir, GRID.ow, GRID.oh)] !== 0 : true;
+}
+
+/* ---------- frame 运算 ----------
+   每组临时向量只在一个函数里用，避免嵌套调用互相踩。 */
+const _up = new THREE.Vector3(), _fw = new THREE.Vector3(), _rt = new THREE.Vector3();
+const _qt = new THREE.Quaternion();
+function fUp(q, out = _up) { return out.set(0, 1, 0).applyQuaternion(q); }
+function fFwd(q, out = _fw) { return out.set(0, 0, 1).applyQuaternion(q); }
+function fRight(q, out = _rt) { return out.set(1, 0, 0).applyQuaternion(q); }
+
+const _adv = new THREE.Vector3();
+function advance(q, dist) {                      // 沿大圆前进
+  if (!dist) return q;
+  _qt.setFromAxisAngle(fRight(q, _adv), dist / PLANET.R);
+  return q.premultiply(_qt).normalize();
+}
+function turn(q, ang) {                          // 绕本地朝天轴转向
+  if (!ang) return q;
+  _qt.setFromAxisAngle(YAXIS, ang);
+  return q.multiply(_qt).normalize();
+}
+const _fpU = new THREE.Vector3();
+function framePos(q, h, out) {                   // frame + 离地高度 -> 世界坐标
+  fUp(q, _fpU);
+  return out.copy(PLANET.C).addScaledVector(_fpU, groundR(_fpU) + h);
+}
+
+/* 由「朝天方向 + 朝向参考」构造 frame。基底满足 right = up × fwd（右手系）。 */
+const _bU = new THREE.Vector3(), _bF = new THREE.Vector3(), _bR = new THREE.Vector3();
+const _bM = new THREE.Matrix4();
+function frameFromDir(dir, refFwd, out = new THREE.Quaternion()) {
+  _bU.copy(dir).normalize();
+  _bF.copy(refFwd && refFwd.lengthSq() > 1e-8 ? refFwd : YAXIS);
+  _bF.addScaledVector(_bU, -_bF.dot(_bU));
+  if (_bF.lengthSq() < 1e-8) {
+    _bF.set(1, 0, 0).addScaledVector(_bU, -_bU.x);
+    if (_bF.lengthSq() < 1e-8) _bF.set(0, 0, 1).addScaledVector(_bU, -_bU.z);
+  }
+  _bF.normalize();
+  _bR.crossVectors(_bU, _bF);
+  _bM.makeBasis(_bR, _bU, _bF);
+  return out.setFromRotationMatrix(_bM);
+}
+
+/* 大圆距离：球面上两点之间真正要走的路程 */
+const _adA = new THREE.Vector3(), _adB = new THREE.Vector3();
+function arcDist(a, b) {
+  _adA.copy(a).sub(PLANET.C).normalize();
+  _adB.copy(b).sub(PLANET.C).normalize();
+  return PLANET.R * Math.acos(clamp(_adA.dot(_adB), -1, 1));
+}
+
+/* frame 朝向相对「正北」（指向 +Y 极点的切向）的角度，小地图用 */
+const _brN = new THREE.Vector3(), _brC = new THREE.Vector3();
+function frameBearing(q) {
+  fUp(q, _up); fFwd(q, _fw);
+  _brN.copy(YAXIS).addScaledVector(_up, -YAXIS.dot(_up));
+  if (_brN.lengthSq() < 1e-8) return 0;
+  _brN.normalize();
+  return Math.atan2(_brC.crossVectors(_brN, _fw).dot(_up), _brN.dot(_fw));
+}
+
+/* 目标点相对 frame 正前方的偏角（0 = 正前），导航箭头用 */
+const _rbT = new THREE.Vector3(), _rbC = new THREE.Vector3();
+function relBearing(q, from, target) {
+  fUp(q, _up); fFwd(q, _fw);
+  _rbT.copy(target).sub(from);
+  _rbT.addScaledVector(_up, -_rbT.dot(_up));
+  if (_rbT.lengthSq() < 1e-8) return 0;
+  _rbT.normalize();
+  return Math.atan2(_rbC.crossVectors(_fw, _rbT).dot(_up), _fw.dot(_rbT));
+}
+
+/* ---------- 烘地表半径场 ----------
+   逐三角形做重心插值，而不是像平面版那样按包围盒填最大值：
+   球壳一个面片能盖住上百个格子，填最大值会把地面变成台阶，车会一路弹跳。 */
+function rasterRadius(buf, W, H, au, av, ar) {
+  /* 跨 ±180° 经线的三角形，把靠左那侧整体 +W，写入时再取模绕回来 */
+  let u0 = au[0], u1 = au[1], u2 = au[2];
+  if (Math.max(u0, u1, u2) - Math.min(u0, u1, u2) > W * 0.5) {
+    if (u0 < W * 0.5) u0 += W;
+    if (u1 < W * 0.5) u1 += W;
+    if (u2 < W * 0.5) u2 += W;
+  }
+  const v0 = av[0], v1 = av[1], v2 = av[2];
+
+  /* 面片比格子还小时，重心测试可能一个格心都覆盖不到，先把三个顶点所在格点上 */
+  for (let k = 0; k < 3; k++) {
+    const cv = clamp(Math.floor(av[k]), 0, H - 1);
+    let cu = Math.floor(au[k]) % W; if (cu < 0) cu += W;
+    const j = cv * W + cu;
+    if (buf[j] < ar[k]) buf[j] = ar[k];
+  }
+
+  const den = (v1 - v2) * (u0 - u2) + (u2 - u1) * (v0 - v2);
+  if (Math.abs(den) < 1e-9) return;
+  const cv0 = Math.max(0, Math.floor(Math.min(v0, v1, v2)));
+  const cv1 = Math.min(H - 1, Math.floor(Math.max(v0, v1, v2)));
+  let cu0 = Math.floor(Math.min(u0, u1, u2)), cu1 = Math.floor(Math.max(u0, u1, u2));
+  if (cu1 - cu0 >= W) { cu0 = 0; cu1 = W - 1; }
+  for (let cv = cv0; cv <= cv1; cv++) {
+    const py = cv + 0.5, row = cv * W;
+    for (let cu = cu0; cu <= cu1; cu++) {
+      const px = cu + 0.5;
+      const w0 = ((v1 - v2) * (px - u2) + (u2 - u1) * (py - v2)) / den;
+      const w1 = ((v2 - v0) * (px - u2) + (u0 - u2) * (py - v2)) / den;
+      const w2 = 1 - w0 - w1;
+      if (w0 < -0.03 || w1 < -0.03 || w2 < -0.03) continue;
+      let x = cu % W; if (x < 0) x += W;
+      const r = w0 * ar[0] + w1 * ar[1] + w2 * ar[2];
+      if (buf[row + x] < r) buf[row + x] = r;
     }
   }
-  HM.occ = out;
-  state.wallCells = n1;
 }
 
-function buildHeightmap(root) {
+/* 只标记「是不是这个面」，不插值数值。给路面掩码用，bit 是标记位 */
+function rasterMask(buf, W, H, au, av, bit) {
+  let u0 = au[0], u1 = au[1], u2 = au[2];
+  if (Math.max(u0, u1, u2) - Math.min(u0, u1, u2) > W * 0.5) {
+    if (u0 < W * 0.5) u0 += W;
+    if (u1 < W * 0.5) u1 += W;
+    if (u2 < W * 0.5) u2 += W;
+  }
+  const v0 = av[0], v1 = av[1], v2 = av[2];
+  for (let k = 0; k < 3; k++) {
+    const cv = clamp(Math.floor(av[k]), 0, H - 1);
+    let cu = Math.floor(au[k]) % W; if (cu < 0) cu += W;
+    buf[cv * W + cu] |= bit;
+  }
+  const den = (v1 - v2) * (u0 - u2) + (u2 - u1) * (v0 - v2);
+  if (Math.abs(den) < 1e-9) return;
+  const cv0 = Math.max(0, Math.floor(Math.min(v0, v1, v2)));
+  const cv1 = Math.min(H - 1, Math.floor(Math.max(v0, v1, v2)));
+  let cu0 = Math.floor(Math.min(u0, u1, u2)), cu1 = Math.floor(Math.max(u0, u1, u2));
+  if (cu1 - cu0 >= W) { cu0 = 0; cu1 = W - 1; }
+  for (let cv = cv0; cv <= cv1; cv++) {
+    const py = cv + 0.5, row = cv * W;
+    for (let cu = cu0; cu <= cu1; cu++) {
+      const px = cu + 0.5;
+      const w0 = ((v1 - v2) * (px - u2) + (u2 - u1) * (py - v2)) / den;
+      const w1 = ((v2 - v0) * (px - u2) + (u0 - u2) * (py - v2)) / den;
+      if (w0 < -0.03 || w1 < -0.03 || 1 - w0 - w1 < -0.03) continue;
+      let x = cu % W; if (x < 0) x += W;
+      buf[row + x] |= bit;
+    }
+  }
+}
+
+/* 极点附近可能一个面片都没落上，先横向补，再从中纬往两极纵向补 */
+function fillHoles(buf, W, H) {
+  for (let cv = 0; cv < H; cv++) {
+    const row = cv * W;
+    let first = -1;
+    for (let cu = 0; cu < W; cu++) if (buf[row + cu] > 0) { first = cu; break; }
+    if (first < 0) continue;
+    let last = buf[row + first];
+    for (let k = 0; k < W; k++) {
+      const cu = (first + k) % W;
+      if (buf[row + cu] > 0) last = buf[row + cu];
+      else buf[row + cu] = last;
+    }
+  }
+  const mid = H >> 1;
+  for (let cv = mid; cv >= 0; cv--) if (buf[cv * W] === 0 && cv + 1 < H) buf.copyWithin(cv * W, (cv + 1) * W, (cv + 2) * W);
+  for (let cv = mid; cv < H; cv++) if (buf[cv * W] === 0 && cv > 0) buf.copyWithin(cv * W, (cv - 1) * W, cv * W);
+}
+
+/* 球心用球壳自身顶点的质心拟合。用整个模型的 bbox 中心会被分布不均的
+   高楼带偏二十几个单位，量出来的地表就会凭空多出上百单位的假起伏。 */
+function fitPlanet(root) {
   root.updateMatrixWorld(true);
-  const box = new THREE.Box3().setFromObject(root);
-  HM.minX = box.min.x - 1;
-  HM.minZ = box.min.z - 1;
-  HM.w = Math.ceil((box.max.x + 1 - HM.minX) / HM.cell);
-  HM.h = Math.ceil((box.max.z + 1 - HM.minZ) / HM.cell);
-  const data = HM.data = new Float32Array(HM.w * HM.h);
+  let shell = null;
+  root.traverse(o => { if (o.isMesh && /^Planet/i.test(o.name)) shell = o; });
+  PLANET.C.set(0, 0, 0);
+  if (shell) {
+    const p = shell.geometry.attributes.position, v = new THREE.Vector3();
+    for (let i = 0; i < p.count; i++) PLANET.C.add(v.fromBufferAttribute(p, i).applyMatrix4(shell.matrixWorld));
+    PLANET.C.divideScalar(p.count);
+  } else {
+    new THREE.Box3().setFromObject(root).getCenter(PLANET.C);
+  }
+}
+
+/* 路面材质：整张路网是一个 mesh，靠材质分组区分车道、路缘、人行道和草坪。
+   车流和电动车只跑车道，邮箱和停靠车辆可以上人行道，草坪山地一概不算路。 */
+const DRIVEMAT = /road/i;                  // City_Road / City_RoadLine
+const PAVEMAT = /(sidewalk|curb)/i;        // City_Sidewalk / City_Curb
+
+function bakeGround(root) {
+  const W = GRID.gw, H = GRID.gh;
+  const OW = GRID.ow, OH = GRID.oh;
+  const buf = GRID.ground = new Float32Array(W * H);
+  const surf = GRID.surf = new Uint8Array(OW * OH);
   const v = new THREE.Vector3();
-  let tris = 0;
+  const au = [0, 0, 0], av = [0, 0, 0], ar = [0, 0, 0];
+  const ou = [0, 0, 0], ov = [0, 0, 0];
+  let tris = 0, driveTris = 0;
+  root.updateMatrixWorld(true);
   root.traverse(o => {
-    if (!o.isMesh || !o.geometry || o.userData.__outline) return;
-    const pos = o.geometry.attributes.position;
-    const idx = o.geometry.index;
-    const m = o.matrixWorld;
-    const count = idx ? idx.count : pos.count;
-    for (let i = 0; i + 2 < count; i += 3) {
-      let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, ym = -Infinity;
-      for (let k = 0; k < 3; k++) {
-        const vi = idx ? idx.getX(i + k) : i + k;
-        v.fromBufferAttribute(pos, vi).applyMatrix4(m);
-        if (v.x < x0) x0 = v.x;
-        if (v.x > x1) x1 = v.x;
-        if (v.z < z0) z0 = v.z;
-        if (v.z > z1) z1 = v.z;
-        if (v.y > ym) ym = v.y;
+    if (!o.isMesh || !o.geometry || o.userData.__outline || !TERRAIN.test(o.name)) return;
+    const pos = o.geometry.attributes.position, idx = o.geometry.index, m = o.matrixWorld;
+    const n = idx ? idx.count : pos.count;
+    /* 每个三角形属于哪一段材质：groups 是按索引区间划分的 */
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    const groups = o.geometry.groups && o.geometry.groups.length ? o.geometry.groups : null;
+    const bitOf = mm => {
+      const nm = (mm && mm.name) || '';
+      return DRIVEMAT.test(nm) ? M_DRIVE : PAVEMAT.test(nm) ? M_PAVE : 0;
+    };
+    let gi = 0, bit = groups ? 0 : bitOf(mats[0]);
+    for (let i = 0; i + 2 < n; i += 3) {
+      if (groups) {
+        while (gi < groups.length && i >= groups[gi].start + groups[gi].count) gi++;
+        const g = groups[gi];
+        bit = bitOf(g ? mats[g.materialIndex] || mats[0] : mats[0]);
       }
-      const cx0 = clamp(Math.floor((x0 - HM.minX) / HM.cell), 0, HM.w - 1);
-      const cx1 = clamp(Math.floor((x1 - HM.minX) / HM.cell), 0, HM.w - 1);
-      const cz0 = clamp(Math.floor((z0 - HM.minZ) / HM.cell), 0, HM.h - 1);
-      const cz1 = clamp(Math.floor((z1 - HM.minZ) / HM.cell), 0, HM.h - 1);
-      for (let cz = cz0; cz <= cz1; cz++) {
-        const row = cz * HM.w;
-        for (let cx = cx0; cx <= cx1; cx++) if (data[row + cx] < ym) data[row + cx] = ym;
+      for (let k = 0; k < 3; k++) {
+        v.fromBufferAttribute(pos, idx ? idx.getX(i + k) : i + k).applyMatrix4(m).sub(PLANET.C);
+        const r = v.length() || 1;
+        ar[k] = r;
+        const th = Math.acos(clamp(v.y / r, -1, 1)) / Math.PI;
+        const ph = Math.atan2(v.x, v.z) / (Math.PI * 2) + 0.5;
+        av[k] = th * H; au[k] = ph * W;
+        ov[k] = th * OH; ou[k] = ph * OW;
+      }
+      rasterRadius(buf, W, H, au, av, ar);
+      if (bit) {
+        rasterMask(surf, OW, OH, ou, ov, bit);
+        if (bit === M_DRIVE) driveTris++;
       }
       tris++;
     }
   });
-  state.tris = tris;
+  fillHoles(buf, W, H);
+  /* 基准半径取中位数：山地只占少数，中位数就是「平地」的半径 */
+  const s = [];
+  for (let i = 0; i < buf.length; i += 31) s.push(buf[i]);
+  s.sort((a, b) => a - b);
+  PLANET.R = s[s.length >> 1] || 600;
+  state.terrainTris = tris;
+  state.driveTris = driveTris;
+  /* 材质名对不上时掩码会是空的，那就退回「哪都算路」，别把游戏卡死 */
+  if (!driveTris) GRID.surf = null;
 }
 
-function heightAt(x, z) {
-  const cx = Math.floor((x - HM.minX) / HM.cell);
-  const cz = Math.floor((z - HM.minZ) / HM.cell);
-  if (cx < 0 || cz < 0 || cx >= HM.w || cz >= HM.h) return 99;
-  return HM.data[cz * HM.w + cx];
-}
-
-/* 城市可能带底座：取面积最多的水平面当作路面基准，并整体下移到 y=0 */
-function levelToGround(city) {
-  const bins = new Map();
-  for (let i = 0; i < HM.data.length; i++) {
-    const q = Math.round(HM.data[i] * 4) / 4;
-    bins.set(q, (bins.get(q) || 0) + 1);
+/* ---------- 烘障碍占用图 ----------
+   树冠比树干宽十几倍，拿整体包围盒当碰撞会把整条街堵死。
+   这里只取物体贴地那一截的横截面当占地面积。模型哪根本地轴朝天并不确定
+   （实例被摆到球面各处，各自带着旋转），用实例矩阵把径向方向反推到本地空间来判断，
+   结果按「几何体 + 轴」缓存——3007 个实例只有 201 份网格，算一次就够。 */
+const _im3 = new THREE.Matrix3(), _lu = new THREE.Vector3(), _fp = new THREE.Vector3();
+function footBox(mesh, radial) {
+  const geo = mesh.geometry;
+  _im3.setFromMatrix4(mesh.matrixWorld).invert();
+  _lu.copy(radial).applyMatrix3(_im3);
+  const ax = Math.abs(_lu.x) > Math.abs(_lu.y)
+    ? (Math.abs(_lu.x) > Math.abs(_lu.z) ? 0 : 2)
+    : (Math.abs(_lu.y) > Math.abs(_lu.z) ? 1 : 2);
+  const sign = (ax === 0 ? _lu.x : ax === 1 ? _lu.y : _lu.z) >= 0 ? 1 : -1;
+  const key = '__foot' + ax + (sign > 0 ? 'p' : 'n');
+  if (geo.userData[key]) return geo.userData[key];
+  const p = geo.attributes.position;
+  const get = ax === 0 ? 'getX' : ax === 1 ? 'getY' : 'getZ';
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < p.count; i++) {
+    const c = p[get](i) * sign;
+    if (c < lo) lo = c;
+    if (c > hi) hi = c;
   }
-  let level = 0, best = -1;
-  bins.forEach((n, h) => { if (n > best) { best = n; level = h; } });
-  if (Math.abs(level) < 0.01) return 0;
-  for (let i = 0; i < HM.data.length; i++) HM.data[i] -= level;
-  city.position.y -= level;
-  city.updateMatrixWorld(true);
-  return level;
-}
-
-const WALL = 3.2;   // 相机遮挡等仍用高度
-const STEP = 0.6;   // 地面跟随允许高度（人行道、路缘）
-
-function wallAt(x, z) {
-  if (!HM.occ) return false;
-  const cx = Math.floor((x - HM.minX) / HM.cell);
-  const cz = Math.floor((z - HM.minZ) / HM.cell);
-  if (cx < 0 || cz < 0 || cx >= HM.w || cz >= HM.h) return true;
-  return HM.occ[cz * HM.w + cx] === 1;
-}
-
-function blockedAt(x, z, r = 0.7) {
-  return wallAt(x, z) || wallAt(x + r, z) || wallAt(x - r, z) || wallAt(x, z + r) || wallAt(x, z - r);
-}
-
-/* 建筑之间的街道净宽中位数，用来把城市缩放到与人车匹配的比例 */
-function measureStreetWidth() {
-  const runs = [];
-  const tall = 4;
-  for (let i = 0; i < 4000 && runs.length < 240; i++) {
-    const cx = 2 + Math.floor(Math.random() * (HM.w - 4));
-    const cz = 2 + Math.floor(Math.random() * (HM.h - 4));
-    if (Math.abs(HM.data[cz * HM.w + cx]) > 0.45) continue;
-    let rx = 1, rz = 1;
-    for (let d = 1; d < 80 && cx + d < HM.w && HM.data[cz * HM.w + cx + d] <= tall; d++) rx++;
-    for (let d = 1; d < 80 && cx - d >= 0 && HM.data[cz * HM.w + cx - d] <= tall; d++) rx++;
-    for (let d = 1; d < 80 && cz + d < HM.h && HM.data[(cz + d) * HM.w + cx] <= tall; d++) rz++;
-    for (let d = 1; d < 80 && cz - d >= 0 && HM.data[(cz - d) * HM.w + cx] <= tall; d++) rz++;
-    const w = Math.min(rx, rz) * HM.cell;
-    if (w > 2 && w < 60) runs.push(w);
+  const cut = lo + (hi - lo) * 0.3;
+  const box = new THREE.Box3();
+  for (let i = 0; i < p.count; i++) {
+    if (p[get](i) * sign > cut) continue;
+    box.expandByPoint(_fp.set(p.getX(i), p.getY(i), p.getZ(i)));
   }
-  if (!runs.length) return 0;
-  runs.sort((a, b) => a - b);
-  return runs[Math.floor(runs.length / 2)];
+  if (box.isEmpty()) { geo.computeBoundingBox(); box.copy(geo.boundingBox); }
+  geo.userData[key] = box;
+  return box;
 }
 
-/* 缩放城市，使街道净宽接近 target 米（同步缩放高度图） */
-function rescaleCity(cityRoot, target) {
-  const w = measureStreetWidth();
-  if (!w) return 1;
-  const k = clamp(target / w, 0.25, 4);
-  cityRoot.scale.setScalar(k);
-  cityRoot.updateMatrixWorld(true);
-  HM.cell *= k;
-  HM.minX *= k;
-  HM.minZ *= k;
-  for (let i = 0; i < HM.data.length; i++) HM.data[i] *= k;
-  state.streetW = w * k;
-  state.streetRaw = w;
-  return k;
+const _c8 = [];
+for (let i = 0; i < 8; i++) _c8.push(new THREE.Vector3());
+const _su = [0, 0, 0, 0, 0, 0, 0, 0];
+function stampCells(occ, W, H, dirs) {
+  let vmin = Infinity, vmax = -Infinity;
+  for (let i = 0; i < 8; i++) {
+    const d = dirs[i];
+    _su[i] = (Math.atan2(d.x, d.z) / (Math.PI * 2) + 0.5) * W;
+    const v = Math.acos(clamp(d.y, -1, 1)) / Math.PI * H;
+    if (v < vmin) vmin = v;
+    if (v > vmax) vmax = v;
+  }
+  let umin = Infinity, umax = -Infinity;
+  for (let i = 0; i < 8; i++) { if (_su[i] < umin) umin = _su[i]; if (_su[i] > umax) umax = _su[i]; }
+  if (umax - umin > W * 0.5) {                       // 跨经线
+    umin = Infinity; umax = -Infinity;
+    for (let i = 0; i < 8; i++) {
+      const u = _su[i] < W * 0.5 ? _su[i] + W : _su[i];
+      if (u < umin) umin = u;
+      if (u > umax) umax = u;
+    }
+  }
+  let cu0 = Math.floor(umin) - 1, cu1 = Math.floor(umax) + 1;
+  if (cu1 - cu0 >= W) { cu0 = 0; cu1 = W - 1; }
+  const cv0 = Math.max(0, Math.floor(vmin) - 1), cv1 = Math.min(H - 1, Math.floor(vmax) + 1);
+  for (let cv = cv0; cv <= cv1; cv++) {
+    const row = cv * W;
+    for (let cu = cu0; cu <= cu1; cu++) {
+      let x = cu % W; if (x < 0) x += W;
+      occ[row + x] = 1;
+    }
+  }
 }
 
-/* 该点周围的空旷半径（用于找马路中间） */
-function openRadius(x, z, max = 7) {
+function bakeOcc(root) {
+  const W = GRID.ow, H = GRID.oh;
+  const occ = GRID.occ = new Uint8Array(W * H);
+  const radial = new THREE.Vector3();
+  let n = 0;
+  root.updateMatrixWorld(true);
+  root.traverse(o => {
+    if (!o.isMesh || !o.geometry || o.userData.__outline || !BLOCKING.test(o.name)) return;
+    radial.setFromMatrixPosition(o.matrixWorld).sub(PLANET.C);
+    if (radial.lengthSq() < 1e-6) return;
+    radial.normalize();
+    const box = footBox(o, radial);
+    let i = 0;
+    for (let bx = 0; bx < 2; bx++) for (let by = 0; by < 2; by++) for (let bz = 0; bz < 2; bz++) {
+      _c8[i++].set(bx ? box.max.x : box.min.x, by ? box.max.y : box.min.y, bz ? box.max.z : box.min.z)
+        .applyMatrix4(o.matrixWorld).sub(PLANET.C).normalize();
+    }
+    stampCells(occ, W, H, _c8);
+    n++;
+  });
+  state.occObjects = n;
+}
+
+/* 手工往占用图上盖一块（停靠车辆之类自己摆的东西） */
+const _soU = new THREE.Vector3(), _soF = new THREE.Vector3(), _soR = new THREE.Vector3();
+function stampOcc(q, r) {
+  if (!GRID.occ) return;
+  fUp(q, _soU); fFwd(q, _soF); fRight(q, _soR);
+  let i = 0;
+  for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2) for (let c = 0; c < 2; c++) {
+    _c8[i++].copy(_soU).multiplyScalar(PLANET.R)
+      .addScaledVector(_soR, a * r).addScaledVector(_soF, b * r * (c ? 0.5 : 1)).normalize();
+  }
+  stampCells(GRID.occ, GRID.ow, GRID.oh, _c8);
+}
+
+/* ---------- 地平线剔除 ----------
+   three.js 只做视锥剔除、不做遮挡剔除：星球另一面的几千栋楼照样会进 draw call，
+   只是被地表挡住看不见（实测 1100+ 次绘制）。这里按几何关系手工算一次：
+   眼高 e 时地平线在 acos(R/(R+e)) 角距处，高 H 的物体自己还能再露出 acos(R/(R+H))，
+   两者相加就是它有可能被看到的最大角距。每帧只要一个点积，比多画一千次便宜得多。 */
+const EYE = 15;
+const VIEW_ARC = 265;              // 再远的东西已经被雾吃掉了，不必再画
+const horizon = [];
+const _hzC = new THREE.Vector3(), _hzB = new THREE.Box3(), _hzP = new THREE.Vector3();
+function prepareHorizon(root) {
+  horizon.length = 0;
+  root.updateMatrixWorld(true);
+  const eyeAng = Math.acos(clamp(PLANET.R / (PLANET.R + EYE), -1, 1));
+  const maxAng = VIEW_ARC / PLANET.R;
+  root.traverse(o => {
+    if (!o.isMesh || o.userData.__outline || TERRAIN.test(o.name)) return;
+    _hzB.setFromObject(o);
+    if (_hzB.isEmpty()) return;
+    _hzB.getCenter(_hzC).sub(PLANET.C);
+    if (_hzC.lengthSq() < 1e-6) return;
+    let top = 0;
+    for (let i = 0; i < 8; i++) {
+      _hzP.set(i & 1 ? _hzB.max.x : _hzB.min.x, i & 2 ? _hzB.max.y : _hzB.min.y, i & 4 ? _hzB.max.z : _hzB.min.z);
+      top = Math.max(top, _hzP.sub(PLANET.C).length());
+    }
+    const H = Math.max(0.5, top - PLANET.R);
+    const ang = eyeAng + Math.acos(clamp(PLANET.R / (PLANET.R + H), -1, 1)) + 0.03;
+    horizon.push({ o, d: _hzC.clone().normalize(), lim: Math.cos(Math.min(ang, maxAng)) });
+  });
+}
+
+const _hzU = new THREE.Vector3();
+function horizonCull(q) {
+  fUp(q, _hzU);
+  let on = 0;
+  for (const e of horizon) {
+    const v = e.d.dot(_hzU) >= e.lim;
+    e.o.visible = v;
+    if (v) on++;
+  }
+  state.hzOn = on;
+}
+
+/* ---------- 碰撞查询 ---------- */
+const _blU = new THREE.Vector3(), _blF = new THREE.Vector3(), _blR = new THREE.Vector3(), _blT = new THREE.Vector3();
+function blockedAt(q, r = 0.7) {
+  if (!GRID.occ) return false;
+  fUp(q, _blU);
+  if (blockedDir(_blU)) return true;
+  fFwd(q, _blF); fRight(q, _blR);
+  for (let i = 0; i < 4; i++) {
+    _blT.copy(_blU).multiplyScalar(PLANET.R)
+      .addScaledVector(_blR, i === 0 ? r : i === 1 ? -r : 0)
+      .addScaledVector(_blF, i === 2 ? r : i === 3 ? -r : 0)
+      .normalize();
+    if (blockedDir(_blT)) return true;
+  }
+  return false;
+}
+
+/* 从 frame 出发，正前方 dist 米内是否通畅 */
+const _dcQ = new THREE.Quaternion();
+function dirClear(q, dist, r = 1.05) {
+  _dcQ.copy(q);
+  advance(_dcQ, 2);
+  for (let d = 2; d <= dist; d += 1.6) {
+    if (blockedAt(_dcQ, r)) return false;
+    advance(_dcQ, 1.6);
+  }
+  return true;
+}
+
+/* 这个位置周围的空旷半径（米），用来找马路中间 */
+const _orQ = new THREE.Quaternion(), _orU = new THREE.Vector3();
+function openRadius(q, max = 7) {
   for (let r = 1; r <= max; r++) {
     for (let a = 0; a < 8; a++) {
-      const ang = a * Math.PI / 4;
-      if (wallAt(x + Math.cos(ang) * r, z + Math.sin(ang) * r)) return r - 1;
+      _orQ.copy(q);
+      turn(_orQ, a * Math.PI / 4);
+      advance(_orQ, r);
+      if (blockedDir(fUp(_orQ, _orU))) return r - 1;
     }
   }
   return max;
 }
 
-function findRoadPoint(minOpen = 3, near = null, maxDist = 0) {
-  const spanX = HM.w * HM.cell, spanZ = HM.h * HM.cell;
-  for (let i = 0; i < 900; i++) {
-    let x, z;
-    if (near && maxDist) {
-      const a = rand(0, Math.PI * 2), d = rand(maxDist * 0.35, maxDist);
-      x = near.x + Math.cos(a) * d;
-      z = near.z + Math.sin(a) * d;
-    } else {
-      x = HM.minX + rand(spanX * 0.08, spanX * 0.92);
-      z = HM.minZ + rand(spanZ * 0.08, spanZ * 0.92);
-    }
-    if (Math.abs(heightAt(x, z)) > 0.45) continue;
-    if (openRadius(x, z, minOpen + 1) < minOpen) continue;
-    return new THREE.Vector3(x, 0, z);
+/* 车道判定要看一小片、不能只看脚底一点：路面和草地共用边界顶点，
+   光栅化时会把车道标记漏进邻格，只查中心点会把人放到路缘外的绿化带上。 */
+const _daU = new THREE.Vector3(), _daF = new THREE.Vector3();
+const _daR = new THREE.Vector3(), _daT = new THREE.Vector3();
+function driveAt(q, r = 1.5) {
+  fUp(q, _daU);
+  if (!driveDir(_daU)) return false;
+  if (!GRID.surf || !r) return true;
+  fFwd(q, _daF); fRight(q, _daR);
+  for (let i = 0; i < 4; i++) {
+    _daT.copy(_daU).multiplyScalar(PLANET.R)
+      .addScaledVector(_daR, i === 0 ? r : i === 1 ? -r : 0)
+      .addScaledVector(_daF, i === 2 ? r : i === 3 ? -r : 0)
+      .normalize();
+    if (!driveDir(_daT)) return false;
   }
-  return new THREE.Vector3(0, 0, 0);
+  return true;
 }
 
+/* 地表比基准半径高出这么多以内算平地（路面 / 人行道 / 路缘）；再高就是山，不生成任务点 */
+const FLAT = 6;
+const _isU = new THREE.Vector3();
+function onFlatRoad(q) {
+  fUp(q, _isU);
+  return groundR(_isU) <= PLANET.R + FLAT && paveDir(_isU) && !blockedDir(_isU);
+}
+
+/* 随机找一个「路面上」的 frame：平地 + 不挡路 + 周围有一定空旷度。
+   near 给定时只在它周围 maxDist 米内找；pave 为真时人行道也算。 */
+const _frU = new THREE.Vector3(), _frD = new THREE.Vector3();
+function findRoadFrame(minOpen = 3, near = null, maxDist = 0, pave = false) {
+  const q = new THREE.Quaternion();
+  for (let i = 0; i < 1500; i++) {
+    if (near && maxDist) {
+      q.copy(near);
+      turn(q, rand(0, Math.PI * 2));
+      advance(q, rand(maxDist * 0.35, maxDist));
+    } else {
+      /* 球面均匀采样：z 均匀分布才不会在两极堆点 */
+      const z = rand(-1, 1), a = rand(0, Math.PI * 2), s = Math.sqrt(Math.max(0, 1 - z * z));
+      frameFromDir(_frD.set(s * Math.cos(a), z, s * Math.sin(a)), null, q);
+    }
+    fUp(q, _frU);
+    if (groundR(_frU) > PLANET.R + FLAT) continue;
+    if (!(pave ? paveDir(_frU) : driveAt(q, 1.5))) continue;
+    if (blockedDir(_frU)) continue;
+    if (openRadius(q, minOpen + 1) < minOpen) continue;
+    turn(q, rand(0, Math.PI * 2));
+    return q;
+  }
+  return frameFromDir(YAXIS, null, q);
+}
+
+/* 出生点：找一块空旷、且至少有一个方向能连着开 22 米的地方 */
 function pickSpawn() {
   let best = null;
-  for (let i = 0; i < 2500; i++) {
-    const x = HM.minX + rand(HM.w * HM.cell * 0.2, HM.w * HM.cell * 0.8);
-    const z = HM.minZ + rand(HM.h * HM.cell * 0.2, HM.h * HM.cell * 0.8);
-    if (Math.abs(heightAt(x, z)) > 0.4) continue;
-    const r = openRadius(x, z, 7);
+  for (let i = 0; i < 60; i++) {
+    const q = findRoadFrame(3);
+    const r = openRadius(q, 7);
     if (r < 3) continue;
-    // 找一条能向前开的方向
-    for (const head of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
-      const fx = Math.sin(head), fz = Math.cos(head);
-      let clear = true;
-      for (let d = 2; d <= 22; d += 2) if (blockedAt(x + fx * d, z + fz * d, 1.2)) { clear = false; break; }
-      if (!clear) continue;
-      const score = r * 10 + 22;
-      if (!best || score > best.score) best = { pos: new THREE.Vector3(x, 0, z), heading: head, score };
-      break;
+    for (let k = 0; k < 4; k++) {
+      if (dirClear(q, 22, 1.2)) {
+        const score = r * 10 + 22;
+        if (!best || score > best.score) best = { q: q.clone(), score };
+        break;
+      }
+      turn(q, Math.PI / 2);
     }
     if (best && best.score > 90) break;
   }
-  return best || { pos: new THREE.Vector3(0, 0, 0), heading: 0 };
+  return best ? best.q : findRoadFrame(1);
 }
 
 /* ---------- 邮箱 / 标记 ---------- */
-function makeMailbox(pos) {
-  const g = new THREE.Group();
-  const red = new THREE.MeshToonMaterial({ color: 0xdb3b32, gradientMap: GRAD });
-  const dark = new THREE.MeshToonMaterial({ color: 0x39404a, gradientMap: GRAD });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.86, 0.5), red);
-  body.position.y = 1.06;
-  const top = new THREE.Mesh(new THREE.CylinderGeometry(0.31, 0.31, 0.5, 12, 1, false, 0, Math.PI), red);
-  top.rotation.z = Math.PI / 2;
-  top.position.y = 1.49;
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.66, 8), dark);
-  pole.position.y = 0.33;
-  const slot = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.07, 0.04), dark);
-  slot.position.set(0, 1.3, 0.26);
-  [body, top, pole, slot].forEach(m => { m.castShadow = true; g.add(m); });
+/* 邮箱是四个零件，做成四个 mesh 就是四份提交、加描边壳翻倍，九个邮箱要 72 次。
+   用顶点色合成一个网格，只剩 2 次。 */
+let mailboxGeo = null;
+function makeMailbox(q) {
+  if (!mailboxGeo) {
+    mailboxGeo = mergeParts([
+      pbox(0.62, 0.86, 0.5, 0, 1.06, 0, 0xdb3b32),
+      pcyl(0.31, 0.31, 0.5, 12, 0, 1.49, 0, 0xdb3b32, Math.PI / 2),
+      pcyl(0.09, 0.09, 0.66, 8, 0, 0.33, 0, 0x39404a),
+      pbox(0.4, 0.07, 0.04, 0, 1.3, 0.26, 0x39404a)
+    ]);
+  }
+  const g = new THREE.Mesh(mailboxGeo, VC_MAT);
+  g.castShadow = true;
+  g.receiveShadow = true;
   addOutline(g, 0.022);
-  g.position.copy(pos);
+  /* 站到球面上：本地 +Y 朝天由 frame 的四元数直接给出 */
+  framePos(q, 0, g.position);
+  g.quaternion.copy(q);
+  g.userData.q = q.clone();
   scene.add(g);
   return g;
 }
@@ -1063,7 +1420,16 @@ function makeMarker(color, icon) {
   return g;
 }
 
-/* ---------- 玩家（电动车 + 骑手） ---------- */
+/* 光柱得沿着当地的「上」立起来，不然在星球侧面会歪着躺下去 */
+function placeMarker(m, q) {
+  framePos(q, 0, m.position);
+  m.quaternion.copy(q);
+  m.visible = true;
+}
+
+/* ---------- 玩家（电动车 + 骑手） ----------
+   容器的 position / quaternion 每帧由球面 frame 算出；
+   rig 的 rotation.y = -π/2 这类本地修正照旧有效，因为 frame 的本地轴语义没变。 */
 const player = new THREE.Group();
 scene.add(player);
 const rig = new THREE.Group();       // 模型朝 +X，转成朝 +Z
@@ -1081,7 +1447,7 @@ const walkerRig = new THREE.Group();
 walkerRig.rotation.y = -Math.PI / 2;
 walker.add(walkerRig);
 
-const foot = { speed: 0, vy: 0, air: false, heading: 0 };
+const foot = { speed: 0, vy: 0, air: false, h: 0, q: new THREE.Quaternion(), camOff: 0 };
 
 /* ---------- 骨骼动画 ---------- */
 const boy = { pivot: null, mixer: null, actions: {}, cur: '', seat: new THREE.Vector3() };
@@ -1129,6 +1495,7 @@ function setRideBtn() {
   if (b) b.textContent = state.onBike ? '下车' : '上车';
 }
 
+const _dmQ = new THREE.Quaternion();
 function dismount() {
   if (!state.onBike || !boy.pivot) return;
   if (Math.abs(state.speed) > 3.2) { toast('停稳后才能下车'); return; }
@@ -1137,14 +1504,21 @@ function dismount() {
   walkerRig.add(boy.pivot);
   boy.pivot.position.set(0, 0, 0);
 
-  const side = new THREE.Vector3(Math.cos(state.heading), 0, -Math.sin(state.heading));
-  let p = player.position.clone().addScaledVector(side, 1.15);
-  if (blockedAt(p.x, p.z, CFG.footRadius)) p = player.position.clone().addScaledVector(side, -1.15);
-  if (blockedAt(p.x, p.z, CFG.footRadius)) p = player.position.clone();
-  walker.position.set(p.x, Math.max(0, heightAt(p.x, p.z)), p.z);
-  foot.heading = state.heading;
+  /* 从车侧下来：先转 90° 走 1.15 米，再把朝向转回和车一致 */
+  const side = q => { turn(q, Math.PI / 2); advance(q, 1.15); turn(q, -Math.PI / 2); };
+  _dmQ.copy(state.q);
+  side(_dmQ);
+  if (blockedAt(_dmQ, CFG.footRadius)) {
+    _dmQ.copy(state.q);
+    turn(_dmQ, -Math.PI / 2); advance(_dmQ, 1.15); turn(_dmQ, Math.PI / 2);
+  }
+  if (blockedAt(_dmQ, CFG.footRadius)) _dmQ.copy(state.q);
+  foot.q.copy(_dmQ);
+  foot.h = 0;
+  foot.gr = undefined;                 // 换了位置，别从车的地表半径插值过来
+  foot.camOff = 0;
   foot.speed = 0; foot.vy = 0; foot.air = false;
-  walker.rotation.y = foot.heading;
+  syncBody(walker, foot.q, 0, foot, 1);
   walker.visible = true;
   boy.cur = '';
   playAnim('idle', { fade: 0.12 });
@@ -1167,8 +1541,8 @@ function mount() {
 
 function toggleRide() { state.onBike ? dismount() : mount(); }
 
+function focusFrame() { return state.onBike ? state.q : foot.q; }
 function focusPos() { return state.onBike ? player.position : walker.position; }
-function focusHeading() { return state.onBike ? state.heading : foot.heading; }
 function focusSpeed() { return state.onBike ? state.speed : foot.speed; }
 
 /* ---------- HUD ---------- */
@@ -1204,23 +1578,26 @@ dropMarker.visible = false;
 
 function nextTask() {
   if (state.phase === 'pickup') {
-    let mb = state.mailboxes[Math.floor(Math.random() * state.mailboxes.length)];
-    for (let i = 0; i < 6; i++) {
-      const c = state.mailboxes[Math.floor(Math.random() * state.mailboxes.length)];
-      if (c.position.distanceTo(focusPos()) > 25) { mb = c; break; }
+    /* 取最近的那个（但别是刚刚站着的那个）：邮箱铺开三百米，随机挑会挑到最远的 */
+    const here = focusPos();
+    let mb = null, bd = Infinity;
+    for (const c of state.mailboxes) {
+      const d = c.position.distanceTo(here);
+      if (d > 25 && d < bd) { bd = d; mb = c; }
     }
+    if (!mb) mb = state.mailboxes[Math.floor(Math.random() * state.mailboxes.length)];
     state.target = mb.position.clone();
-    pickupMarker.position.copy(state.target);
-    pickupMarker.visible = true;
+    state.targetQ = mb.userData.q;
+    placeMarker(pickupMarker, state.targetQ);
     dropMarker.visible = false;
     $('taskTitle').textContent = '新的信件';
     $('taskDesc').textContent = '去红色邮箱领取下一封信';
     $('taskIcon').textContent = '📮';
   } else {
-    const p = findRoadPoint(2.5, focusPos(), 60);
-    state.target = p;
-    dropMarker.position.copy(p);
-    dropMarker.visible = true;
+    const q = findRoadFrame(2.5, focusFrame(), 60, true);
+    state.targetQ = q;
+    state.target = framePos(q, 0, new THREE.Vector3());
+    placeMarker(dropMarker, q);
     pickupMarker.visible = false;
     $('taskTitle').textContent = '送信中';
     $('taskDesc').textContent = '把信送到绿色光柱的住户';
@@ -1328,67 +1705,95 @@ document.querySelectorAll('.res .plus').forEach(p => p.addEventListener('click',
   document.querySelector('.bbtn[data-panel="shop"]').click();
 }));
 
-/* ---------- 小地图 ---------- */
+/* ---------- 小地图 ----------
+   底图就是等距圆柱（经纬）展开的地表格网，玩家所在处截一小块出来。
+   高纬度处一格经度对应的实际距离会缩短，所以横向要按 sin(θ) 少截一些，
+   否则小地图会被横向拉扁。 */
 const mini = $('mini'), mg = mini.getContext('2d');
 function buildMiniImage() {
+  const W = GRID.gw, H = GRID.gh;
+  if (!GRID.ground) return;
   const cv = document.createElement('canvas');
-  cv.width = HM.w; cv.height = HM.h;
+  cv.width = W; cv.height = H;
   const g = cv.getContext('2d');
-  const img = g.createImageData(HM.w, HM.h);
-  for (let i = 0; i < HM.w * HM.h; i++) {
-    const h = HM.data[i];
-    let r, gg, b;
-    if (HM.occ && HM.occ[i]) { r = 186; gg = 178; b = 166; }
-    else if (Math.abs(h) <= 0.06) { r = 42; gg = 48; b = 54; }
-    else if (h < WALL) { r = 96; gg = 104; b = 112; }
-    else if (h < 14) { r = 168; gg = 158; b = 142; }
-    else { r = 206; gg = 198; b = 186; }
-    img.data[i * 4] = r; img.data[i * 4 + 1] = gg; img.data[i * 4 + 2] = b; img.data[i * 4 + 3] = 255;
+  const img = g.createImageData(W, H);
+  for (let v = 0; v < H; v++) {
+    for (let u = 0; u < W; u++) {
+      const i = v * W + u;
+      const rel = GRID.ground[i] - PLANET.R;
+      const oi = Math.min(GRID.oh - 1, (v * GRID.oh / H) | 0) * GRID.ow +
+        Math.min(GRID.ow - 1, (u * GRID.ow / W) | 0);
+      let r, gg, b;
+      if (GRID.occ && GRID.occ[oi]) { r = 186; gg = 178; b = 166; }   // 楼 / 树 / 石
+      else if (GRID.surf && (GRID.surf[oi] & M_DRIVE)) { r = 38; gg = 42; b = 48; }  // 车道
+      else if (GRID.surf && GRID.surf[oi]) { r = 120; gg = 116; b = 106; }           // 人行道
+      else if (rel > FLAT * 2) { r = 150; gg = 132; b = 104; }        // 山
+      else { r = 96; gg = 118; b = 84; }                              // 草地 / 空地
+      img.data[i * 4] = r; img.data[i * 4 + 1] = gg; img.data[i * 4 + 2] = b; img.data[i * 4 + 3] = 255;
+    }
   }
   g.putImageData(img, 0, 0);
-  HM.img = cv;
+  GRID.img = cv;
 }
+
+const _mmU = new THREE.Vector3(), _mmN = new THREE.Vector3(), _mmE = new THREE.Vector3();
+const _mmF = new THREE.Vector3(), _mmD = new THREE.Vector3();
 function drawMini() {
-  const S = mini.width, R = 62;
-  const fp = focusPos();
+  const S = mini.width, RV = 62;
   mg.fillStyle = '#1a222a';
   mg.fillRect(0, 0, S, S);
-  if (HM.img) {
-    const k = S / (R * 2);
-    const sx = (fp.x - R - HM.minX) / HM.cell;
-    const sz = (fp.z - R - HM.minZ) / HM.cell;
-    const sw = (R * 2) / HM.cell;
+  const fq = focusFrame(), fp = focusPos();
+  fUp(fq, _mmU);
+  /* 当地的「北」= 世界 +Y 投到切平面；东 = 北 × 上（与经度 u 增大方向一致） */
+  _mmN.copy(YAXIS).addScaledVector(_mmU, -YAXIS.dot(_mmU));
+  if (_mmN.lengthSq() < 1e-6) fFwd(fq, _mmN);
+  _mmN.normalize();
+  _mmE.crossVectors(_mmN, _mmU).normalize();
+  const k = S / (RV * 2);
+
+  if (GRID.img) {
+    const W = GRID.gw, H = GRID.gh;
+    const theta = Math.acos(clamp(_mmU.y, -1, 1));
+    const cu = (Math.atan2(_mmU.x, _mmU.z) / (Math.PI * 2) + 0.5) * W;
+    const cv = theta / Math.PI * H;
+    const halfV = RV / (PLANET.R * Math.PI / H);
+    const halfU = RV / (PLANET.R * Math.PI * 2 * Math.max(0.08, Math.sin(theta)) / W);
+    const dw = halfU * 2, dh = halfV * 2;
     mg.imageSmoothingEnabled = false;
-    mg.drawImage(HM.img, sx, sz, sw, sw, 0, 0, S, S);
-    if (state.target) {
-      const dx = state.target.x - fp.x, dz = state.target.z - fp.z;
-      const d = Math.hypot(dx, dz);
-      const c = d > R ? R / d : 1;
-      mg.fillStyle = state.phase === 'pickup' ? '#ff5a4a' : '#38c76a';
-      mg.beginPath();
-      mg.arc((dx * c + R) * k, (dz * c + R) * k, 7, 0, 7);
-      mg.fill();
+    mg.save();
+    mg.beginPath(); mg.rect(0, 0, S, S); mg.clip();
+    /* 跨 ±180° 经线时窗口一半在图的另一端，左右各补画一次 */
+    for (const sh of [-W, 0, W]) {
+      mg.drawImage(GRID.img, cu - halfU + sh, cv - halfV, dw, dh, -sh * (S / dw), 0, S, S);
     }
-    if (!state.onBike) {
-      const dx = (player.position.x - fp.x) * k, dz = (player.position.z - fp.z) * k;
-      if (Math.abs(dx) < S / 2 - 4 && Math.abs(dz) < S / 2 - 4) {
-        mg.fillStyle = '#ff9d2e';
-        mg.beginPath();
-        mg.arc(S / 2 + dx, S / 2 + dz, 4, 0, 7);
-        mg.fill();
-      }
-    }
-    mg.fillStyle = '#10161c';
-    for (const car of traffic) {
-      if (car.mesh.position.y < -10) continue;
-      const dx = (car.x - fp.x) * k, dz = (car.z - fp.z) * k;
-      if (Math.abs(dx) > S / 2 - 3 || Math.abs(dz) > S / 2 - 3) continue;
-      mg.fillRect(S / 2 + dx - 2, S / 2 + dz - 2, 4, 4);
-    }
+    mg.restore();
   }
+
+  const dot = (pos, color, r) => {
+    _mmD.copy(pos).sub(fp);
+    const x = S / 2 + _mmD.dot(_mmE) * k, y = S / 2 - _mmD.dot(_mmN) * k;
+    if (Math.abs(x - S / 2) > S / 2 - r || Math.abs(y - S / 2) > S / 2 - r) return;
+    mg.fillStyle = color;
+    mg.beginPath(); mg.arc(x, y, r, 0, 7); mg.fill();
+  };
+
+  if (state.target) {
+    /* 目标可能在视野外，把它压到边缘上 */
+    _mmD.copy(state.target).sub(fp);
+    let dx = _mmD.dot(_mmE), dy = _mmD.dot(_mmN);
+    const d = Math.hypot(dx, dy);
+    if (d > RV) { dx *= RV / d; dy *= RV / d; }
+    mg.fillStyle = state.phase === 'pickup' ? '#ff5a4a' : '#38c76a';
+    mg.beginPath(); mg.arc(S / 2 + dx * k, S / 2 - dy * k, 7, 0, 7); mg.fill();
+  }
+  if (!state.onBike) dot(player.position, '#ff9d2e', 4);
+  for (const car of traffic) if (car.alive) dot(car.mesh.position, '#10161c', 2.5);
+
+  /* 箭头：北朝上，所以按「朝向在东/北上的分量」转 */
+  fFwd(fq, _mmF);
   mg.save();
   mg.translate(S / 2, S / 2);
-  mg.rotate(-focusHeading());
+  mg.rotate(Math.atan2(_mmF.dot(_mmE), _mmF.dot(_mmN)));
   mg.fillStyle = '#ffd24a';
   mg.beginPath();
   mg.moveTo(0, -10); mg.lineTo(7, 9); mg.lineTo(0, 4); mg.lineTo(-7, 9);
@@ -1398,10 +1803,74 @@ function drawMini() {
 }
 
 /* ---------- 物理 ---------- */
-const forward = new THREE.Vector3();
+/* 地表半径在路缘、草坡处会跳一下，直接贴上去人会瞬移，拿上一帧的值做平滑。
+   跳变超过 8 米当成重生 / 传送，直接贴过去不平滑。 */
+const _sbU = new THREE.Vector3();
+function syncBody(obj, q, h, ent, k) {
+  fUp(q, _sbU);
+  let gr = groundR(_sbU);
+  if (ent) {
+    if (ent.gr === undefined || Math.abs(gr - ent.gr) > 8) ent.gr = gr;
+    else ent.gr += (gr - ent.gr) * k;
+    gr = ent.gr;
+  }
+  obj.position.copy(PLANET.C).addScaledVector(_sbU, gr + h);
+  obj.quaternion.copy(q);
+}
+
+/* 撞墙时沿墙滑行：朝斜前方试着挪一点，但朝向不变。返回是否畅通 */
+function slide(q, out, step, r) {
+  out.copy(q);
+  if (!step) return true;
+  advance(out, step);
+  if (!blockedAt(out, r)) return true;
+  for (let i = 0; i < 4; i++) {
+    const a = (i < 2 ? 0.55 : 1.0) * (i % 2 ? -1 : 1);
+    out.copy(q);
+    turn(out, a);
+    advance(out, step * 0.8);
+    turn(out, -a);
+    if (!blockedAt(out, r)) return false;
+  }
+  out.copy(q);
+  return false;
+}
+
+/* ?auto 时自动朝任务点打方向，用来无人值守跑一遍「取信 -> 送达」全流程 */
+const _asU = new THREE.Vector3(), _asF = new THREE.Vector3();
+const _asD = new THREE.Vector3(), _asC = new THREE.Vector3();
+function autoSteer(q) {
+  if (!state.target) return 0;
+  fUp(q, _asU);
+  _asD.copy(state.target).sub(PLANET.C).normalize();
+  _asD.addScaledVector(_asU, -_asD.dot(_asU));
+  if (_asD.lengthSq() < 1e-8) return 0;
+  _asD.normalize();
+  fFwd(q, _asF);
+  return clamp(Math.atan2(_asC.crossVectors(_asF, _asD).dot(_asU), _asF.dot(_asD)) * 1.6, -1, 1);
+}
+
+const _plQ = new THREE.Quaternion();
 function updatePlayer(dt) {
   let th = 0, st = 0;
-  if (AUTO) th += 1;
+  /* 自动驾驶（?auto / 自测）：朝任务点打方向。两个必须处理的细节——
+     一是快到了要收油（到达判定要求车速低于 6m/s，全油门会以 50km/h 冲过标记）；
+     二是顶上墙角后 slide 只能左右偏一点、出不来，得倒车脱困。 */
+  if (AUTO || state.autoDrive) {
+    if (state.esc > 0) {
+      state.esc -= dt;
+      th -= 1;
+      st += state.escS;
+    } else {
+      if (state.speed < 0.6) {
+        state.slowT = (state.slowT || 0) + dt;
+        if (state.slowT > 0.5) { state.esc = 1.1; state.escS = Math.random() < 0.5 ? -1 : 1; state.slowT = 0; }
+      } else state.slowT = 0;
+      st += autoSteer(state.q);
+      const near = state.target && arcDist(player.position, state.target) < 12;
+      th += near ? (state.speed > 4 ? -1 : 0.15) : 1;
+    }
+  }
   if (keys.KeyW || keys.ArrowUp || gasOn) th += 1;
   if (keys.KeyS || keys.ArrowDown || brakeOn) th -= 1;
   if (keys.KeyA || keys.ArrowLeft) st += 1;
@@ -1423,31 +1892,15 @@ function updatePlayer(dt) {
   if (Math.abs(state.speed) < 0.05) state.speed = 0;
 
   const grip = clamp(Math.abs(state.speed) / 3.5, 0, 1);
-  state.heading += st * CFG.steer * dt * grip * Math.sign(state.speed || 1);
-  player.rotation.y = state.heading;
+  turn(state.q, st * CFG.steer * dt * grip * Math.sign(state.speed || 1));
 
-  forward.set(Math.sin(state.heading), 0, Math.cos(state.heading));
   const step = state.speed * dt;
-  const x = player.position.x, z = player.position.z;
-  let nx = x + forward.x * step, nz = z + forward.z * step;
-  let hit = false;
-  if (blockedAt(nx, nz)) {
-    hit = true;
-    nx = x + forward.x * step;
-    nz = z;
-    if (blockedAt(nx, nz)) {
-      nx = x;
-      nz = z + forward.z * step;
-      if (blockedAt(nx, nz)) { nx = x; nz = z; }
-    }
+  if (!slide(state.q, _plQ, step, 0.7)) {
+    state.speed *= 0.35;
+    state.hits = (state.hits || 0) + 1;
   }
-  if (hit) state.speed *= 0.35;
-  if (hit) state.hits = (state.hits || 0) + 1;
-  player.position.x = nx;
-  player.position.z = nz;
-  const gh = heightAt(nx, nz);
-  const targetY = Math.abs(gh) < STEP ? gh : 0;
-  player.position.y += (targetY - player.position.y) * Math.min(1, dt * 8);
+  state.q.copy(_plQ);
+  syncBody(player, state.q, 0, state, Math.min(1, dt * 8));
 
   const lean = -st * clamp(Math.abs(state.speed) / CFG.maxSpeed, 0, 1) * 0.3;
   rig.rotation.z += (lean - rig.rotation.z) * Math.min(1, dt * 8);
@@ -1455,12 +1908,16 @@ function updatePlayer(dt) {
 
 /* ---------- 步行 / 跑 / 跳 ---------- */
 const camF = new THREE.Vector3(), camR = new THREE.Vector3(), moveDir = new THREE.Vector3();
+const _ftU = new THREE.Vector3(), _ftF = new THREE.Vector3(), _ftC = new THREE.Vector3();
+const _ftQ = new THREE.Quaternion();
 function updateFoot(dt) {
+  /* 操作是「相对镜头」的：先把镜头朝向投到脚下那块切平面上 */
+  fUp(foot.q, _ftU);
   camera.getWorldDirection(camF);
-  camF.y = 0;
-  if (camF.lengthSq() < 1e-6) camF.set(0, 0, 1);
+  camF.addScaledVector(_ftU, -camF.dot(_ftU));
+  if (camF.lengthSq() < 1e-8) fFwd(foot.q, camF);
   camF.normalize();
-  camR.set(-camF.z, 0, camF.x);          // 屏幕右方向
+  camR.crossVectors(camF, _ftU).normalize();          // 屏幕右方向
 
   moveDir.set(0, 0, 0);
   moveDir.addScaledVector(camF, -stickVec.y).addScaledVector(camR, stickVec.x);
@@ -1468,25 +1925,29 @@ function updateFoot(dt) {
   if (keys.KeyS || keys.ArrowDown) moveDir.sub(camF);
   if (keys.KeyD || keys.ArrowRight) moveDir.add(camR);
   if (keys.KeyA || keys.ArrowLeft) moveDir.sub(camR);
-  if (AUTO) moveDir.add(camF);
+  /* ?auto 步行时也直奔任务点，没有任务点就一直往前走 */
+  if (AUTO) {
+    if (state.target) moveDir.add(_asD.copy(state.target).sub(PLANET.C).normalize()
+      .addScaledVector(_ftU, -_asD.dot(_ftU)));
+    else moveDir.add(camF);
+  }
 
   const running = gasOn || keys.ShiftLeft || keys.ShiftRight;
   let mag = Math.min(1, moveDir.length());
   if (mag > 0.08) {
-    moveDir.normalize();
+    moveDir.addScaledVector(_ftU, -moveDir.dot(_ftU)).normalize();
     const target = (running ? CFG.runSpeed : CFG.walkSpeed) * mag;
     foot.speed += (target - foot.speed) * Math.min(1, dt * 9);
-    const want = Math.atan2(moveDir.x, moveDir.z);
-    let dh = want - foot.heading;
-    while (dh > Math.PI) dh -= Math.PI * 2;
-    while (dh < -Math.PI) dh += Math.PI * 2;
-    foot.heading += dh * Math.min(1, dt * CFG.footTurn);
+    fFwd(foot.q, _ftF);
+    const dh = Math.atan2(_ftC.crossVectors(_ftF, moveDir).dot(_ftU), _ftF.dot(moveDir));
+    const step = dh * Math.min(1, dt * CFG.footTurn);
+    turn(foot.q, step);
+    foot.camOff -= step;                              // 人转了镜头先不动，之后慢慢跟上
   } else {
     mag = 0;
     foot.speed += (0 - foot.speed) * Math.min(1, dt * 12);
     if (foot.speed < 0.05) foot.speed = 0;
   }
-  walker.rotation.y = foot.heading;
 
   if (jumpQueued) {
     jumpQueued = false;
@@ -1498,34 +1959,23 @@ function updateFoot(dt) {
     }
   }
 
-  const fx = Math.sin(foot.heading), fz = Math.cos(foot.heading);
-  const step = foot.speed * dt;
-  const x = walker.position.x, z = walker.position.z;
-  let nx = x + fx * step, nz = z + fz * step;
-  if (blockedAt(nx, nz, CFG.footRadius)) {
-    nx = x + fx * step; nz = z;
-    if (blockedAt(nx, nz, CFG.footRadius)) {
-      nx = x; nz = z + fz * step;
-      if (blockedAt(nx, nz, CFG.footRadius)) { nx = x; nz = z; foot.speed *= 0.3; }
-    }
-  }
-  walker.position.x = nx;
-  walker.position.z = nz;
+  if (!slide(foot.q, _ftQ, foot.speed * dt, CFG.footRadius)) foot.speed *= 0.3;
+  foot.q.copy(_ftQ);
 
-  const gh = heightAt(nx, nz);
-  const ground = Math.abs(gh) < STEP + 0.6 ? gh : 0;
+  /* 高度只在「离地」这一维上算重力，方向由 frame 的本地 up 给出 */
   if (foot.air) {
     foot.vy -= CFG.gravity * dt;
-    walker.position.y += foot.vy * dt;
-    if (walker.position.y <= ground && foot.vy < 0) {
-      walker.position.y = ground;
+    foot.h += foot.vy * dt;
+    if (foot.h <= 0 && foot.vy < 0) {
+      foot.h = 0;
       foot.air = false;
       foot.vy = 0;
       boy.cur = '';
     }
   } else {
-    walker.position.y += (ground - walker.position.y) * Math.min(1, dt * 10);
+    foot.h += (0 - foot.h) * Math.min(1, dt * 10);
   }
+  syncBody(walker, foot.q, foot.h, foot, Math.min(1, dt * 10));
 
   if (!foot.air) {
     if (foot.speed > CFG.walkSpeed * 1.15) playAnim('run', { fade: 0.16, speed: clamp(foot.speed / CFG.runSpeed, 0.65, 1.5) });
@@ -1535,42 +1985,61 @@ function updateFoot(dt) {
 }
 
 const camGoal = new THREE.Vector3(), lookGoal = new THREE.Vector3();
-const camDir = new THREE.Vector3();
+const camQ = new THREE.Quaternion();
+const _cUp = new THREE.Vector3(), _cDir = new THREE.Vector3();
+const _cdU = new THREE.Vector3(), _cdQ = new THREE.Quaternion();
 const INSPECT = /(\?|&)insp/.test(location.search);
-function cameraDistance(want, p) {
-  for (let d = 3; d <= want; d += 0.6) {
-    const cy = p.y + 2.6 + d * 0.22;
-    if (heightAt(p.x - camDir.x * d, p.z - camDir.z * d) > cy - 0.3) return Math.max(5.5, d - 0.8);
+/* ?top=80 从正上方看，用来核对出生点、路面掩码、车流是不是真在马路上 */
+const TOPDOWN = parseFloat((location.search.match(/[?&]top=?(\d*)/) || [])[1] || 0) ||
+  (/(\?|&)top/.test(location.search) ? 80 : 0);
+
+/* 镜头往后退时撞到楼就拉近一点 */
+function cameraDistance(want) {
+  for (let d = 3; d <= want; d += 0.9) {
+    _cdQ.copy(camQ);
+    turn(_cdQ, Math.PI);
+    advance(_cdQ, d);
+    if (blockedDir(fUp(_cdQ, _cdU))) return Math.max(5.5, d - 0.9);
   }
   return want;
 }
+
 function updateCamera(dt) {
+  const q = focusFrame();
   const p = focusPos();
-  if (INSPECT) {
-    camera.position.set(p.x + 3.4, p.y + 1.2, p.z + 0.6);
-    camera.lookAt(p.x, p.y + 0.9, p.z);
+
+  /* 骑车时镜头就在车正后方；步行时慢慢转回身后，避免和「相对镜头」操作互相带偏 */
+  camQ.copy(q);
+  if (!state.onBike) {
+    const rate = foot.speed > 0.3 ? 1.8 : 0.5;
+    foot.camOff += (0 - foot.camOff) * Math.min(1, dt * rate);
+    turn(camQ, foot.camOff);
+  }
+  fUp(camQ, _cUp);
+  fFwd(camQ, _cDir);
+  /* 必须同步 up：否则 lookAt 拿世界 +Y 当上方，跑到星球另一面镜头就倒过来了 */
+  camera.up.copy(_cUp);
+
+  if (TOPDOWN) {
+    camera.position.copy(p).addScaledVector(_cUp, TOPDOWN);
+    camera.up.copy(_cDir);
+    camera.lookAt(p);
     return;
   }
-  /* 骑车时机身朝向即镜头朝向；步行时镜头慢慢跟上，避免和「相机相对」操作互相带偏 */
-  if (state.onBike) {
-    state.camYaw = state.heading;
-    camDir.copy(forward);
-  } else {
-    let dh = foot.heading - state.camYaw;
-    while (dh > Math.PI) dh -= Math.PI * 2;
-    while (dh < -Math.PI) dh += Math.PI * 2;
-    const rate = foot.speed > 0.3 ? 1.8 : 0.5;
-    state.camYaw += dh * Math.min(1, dt * rate);
-    camDir.set(Math.sin(state.camYaw), 0, Math.cos(state.camYaw));
+
+  if (INSPECT) {
+    fRight(camQ, _rt);
+    camera.position.copy(p).addScaledVector(_rt, 3.4).addScaledVector(_cUp, 1.2).addScaledVector(_cDir, 0.6);
+    camera.lookAt(lookGoal.copy(p).addScaledVector(_cUp, 0.9));
+    return;
   }
 
   const base = state.onBike ? 9.6 + Math.abs(state.speed) * 0.18 : 5.6 + foot.speed * 0.2;
-  const back = cameraDistance(base, p);
+  const back = cameraDistance(base);
   const high = state.onBike ? 2.6 : 1.9;
-  camGoal.set(p.x - camDir.x * back, p.y + high + back * 0.22, p.z - camDir.z * back);
-  lookGoal.set(p.x + camDir.x * 4.2, p.y + (state.onBike ? 1.3 : 1.1), p.z + camDir.z * 4.2);
-  const k = Math.min(1, dt * (state.onBike ? 6 : 7));
-  camera.position.lerp(camGoal, k);
+  camGoal.copy(p).addScaledVector(_cDir, -back).addScaledVector(_cUp, high + back * 0.22);
+  lookGoal.copy(p).addScaledVector(_cDir, 4.2).addScaledVector(_cUp, state.onBike ? 1.3 : 1.1);
+  camera.position.lerp(camGoal, Math.min(1, dt * (state.onBike ? 6 : 7)));
   camera.lookAt(lookGoal);
 }
 
@@ -1582,9 +2051,9 @@ function updateMarkers(dt, time) {
   });
   if (!state.target) return;
   const p = focusPos();
-  const d = Math.hypot(state.target.x - p.x, state.target.z - p.z);
+  const d = arcDist(p, state.target);
   $('dist').textContent = Math.round(d) + ' m';
-  const ang = Math.atan2(state.target.x - p.x, state.target.z - p.z) - focusHeading();
+  const ang = relBearing(focusFrame(), p, state.target);
   $('arw').style.transform = `rotate(${(-ang * 180 / Math.PI)}deg)`;
   if (d < CFG.reachRadius && Math.abs(focusSpeed()) < 6) reachTarget();
 }
@@ -1599,6 +2068,22 @@ function resize() {
 }
 addEventListener('resize', resize);
 
+/* DEBUG 用：真正会被提交绘制的网格数，以及它们一共有多少个材质分组
+   （一个 mesh 挂 N 个材质就是 N 次 draw call） */
+function countDrawn(o, acc) {
+  if (!o.visible) return acc;
+  if (o.isMesh || o.isSprite) {
+    acc.n++;
+    acc.g += Array.isArray(o.material) ? o.material.length : 1;
+    if (o.castShadow) acc.s++;
+  }
+  for (const c of o.children) countDrawn(c, acc);
+  return acc;
+}
+
+/* 太阳、天空、云都得跟着「当地的上方」走，否则跑到星球侧面时
+   阳光会从地下打上来、天空渐变会横过来。 */
+const _lpU = new THREE.Vector3(), _lpN = new THREE.Vector3(), _lpE = new THREE.Vector3();
 function loop() {
   requestAnimationFrame(loop);
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -1611,21 +2096,42 @@ function loop() {
   updateMarkers(dt, time);
 
   const fp = focusPos();
-  sun.position.set(fp.x + 46, 86, fp.z + 38);
+  fUp(focusFrame(), _lpU);
+  horizonCull(focusFrame());
+  _lpN.copy(YAXIS).addScaledVector(_lpU, -YAXIS.dot(_lpU));
+  if (_lpN.lengthSq() < 1e-6) fFwd(focusFrame(), _lpN);
+  _lpN.normalize();
+  _lpE.crossVectors(_lpN, _lpU).normalize();
+
+  sun.position.copy(fp).addScaledVector(_lpU, 86).addScaledVector(_lpE, 46).addScaledVector(_lpN, 38);
   sun.target.position.copy(fp);
-  sky.position.set(camera.position.x, 0, camera.position.z);
+  sky.position.copy(camera.position);
+  sky.quaternion.setFromUnitVectors(YAXIS, _lpU);
   for (const c of clouds) {
-    c.sp.position.x += c.spd * dt;
-    if (c.sp.position.x > camera.position.x + 400) c.sp.position.x = camera.position.x - 400;
+    c.u += c.spd * dt;
+    if (c.u > 300) c.u -= 600;
+    /* 加上球面下沉量，云才不会在远处扎进地里 */
+    const sag = (c.u * c.u + c.v * c.v) / (2 * PLANET.R);
+    c.sp.position.copy(fp)
+      .addScaledVector(_lpE, c.u).addScaledVector(_lpN, c.v)
+      .addScaledVector(_lpU, c.h + sag);
   }
 
   $('spd').textContent = Math.round(Math.abs(focusSpeed()) * 3.6);
+  if (DEBUG) {
+    if (state.odoP) state.odo = (state.odo || 0) + state.odoP.distanceTo(fp);
+    else state.odoP = new THREE.Vector3();
+    state.odoP.copy(fp);
+  }
   if (DEBUG && time - (state.dbgT || 0) > 0.5) {
     state.dbgT = time;
     const r = renderer.info.render;
+    const cd = countDrawn(scene, { n: 0, g: 0, s: 0 });
     $('dbg').textContent = `draw=${r.calls} tri=${(r.triangles / 1000) | 0}k fps=${(1 / Math.max(dt, 0.001)) | 0}\n` +
-      `pos=${fp.x.toFixed(0)},${fp.z.toFixed(0)} y=${fp.y.toFixed(2)}` +
-      ` ${state.onBike ? '骑车' : '步行 ' + boy.cur} 街宽=${(state.streetW || 0).toFixed(1)}m`;
+      `R=${groundR(_lpU).toFixed(1)}/${PLANET.R.toFixed(0)} 方位=${(frameBearing(focusFrame()) * 57.3).toFixed(0)}°` +
+      ` ${state.onBike ? '骑车' : '步行 ' + boy.cur} 地平线内=${state.hzOn}/${horizon.length}\n` +
+      `提交=${cd.n} 分组=${cd.g} 投影=${cd.s} 速=${(focusSpeed() * 3.6).toFixed(0)} 撞=${state.hits || 0}` +
+      ` 里程=${(state.odo || 0).toFixed(0)}m/${time.toFixed(0)}s`;
   }
   drawMini();
   renderer.render(scene, camera);
@@ -1636,37 +2142,40 @@ async function boot() {
   resize();
   const c = await openCache();
   if (c) {
-    const cached = await withTimeout(c.match('./assets/city-lowpoly.fbx'), 6000, null);
-    setTip(cached ? '本机已有缓存，马上就好' : '首次加载约 37MB，下载一次后会存到本机，之后秒开');
+    const cached = await withTimeout(c.match('./assets/planet-city.fbx'), 6000, null);
+    setTip(cached ? '本机已有缓存，马上就好' : '首次加载约 16MB，下载一次后会存到本机，之后秒开');
   } else {
     setTip('本机缓存不可用（需要 https 打开），每次都要重新下载');
   }
-  setProgress(0.03, '加载城市模型…');
-  const city = await loadOne('./assets/city-lowpoly.fbx', f => setProgress(0.03 + f * 0.42));
-  setProgress(0.48, '布置街道…');
-  normalize(city, { span: CFG.citySpan });
-  toonify(city, { map: inkTexture(await loadTex('./assets/City_low_poly_1024.png')) });
-  const cityRoot = new THREE.Group();
-  cityRoot.add(city);
-  scene.add(cityRoot);
+  setProgress(0.03, '加载星球城市…');
+  /* 贴图不用手动指定：FBXLoader 会把模型里的贴图引用去掉 Windows 路径，
+     然后到 ./assets/ 下找 Textures.png 和 texture_gradient.png */
+  const city = await loadOne('./assets/planet-city.fbx', f => setProgress(0.03 + f * 0.40));
+  setProgress(0.45, '整理网格…');
+  const dd = dedupeGeometries(city);
+  state.geoUnique = dd.unique;
+  toonify(city, { palette: true, castShadow: !IS_MOBILE });
+  scene.add(city);
   await new Promise(r => setTimeout(r, 16));
 
-  setProgress(0.55, '计算碰撞地图…');
-  buildHeightmap(city);
-  state.level = levelToGround(city);
-  state.scale = rescaleCity(cityRoot, CFG.streetWidth);
-  buildCollision(cityRoot);
+  setProgress(0.52, '测量星球…');
+  fitPlanet(city);
+  bakeGround(city);
+  await new Promise(r => setTimeout(r, 16));
+
+  setProgress(0.6, '计算碰撞地图…');
+  bakeOcc(city);
+  prepareHorizon(city);
   buildMiniImage();
   await new Promise(r => setTimeout(r, 16));
 
-  setProgress(0.62, '优化渲染批次…');
-  const merged = mergeCity(cityRoot);
-  if (merged) {
-    scene.add(merged);
-    setProgress(0.66, '勾描边线…');
-    await new Promise(r => setTimeout(r, 16));
-    addOutline(merged, 0.015);
-  }
+  setProgress(0.66, '勾描边线…');
+  /* 地表本身不能描边：反向壳会变成一个套住整个星球的黑球。
+     945 丛地被草也跳过——它们只有巴掌大，描边看不出来，却要多一倍提交。 */
+  const inked = [];
+  city.traverse(o => { if (o.isMesh && !TERRAIN.test(o.name) && !/^Grass/i.test(o.name)) inked.push(o); });
+  for (const o of inked) addOutline(o, 0.015);
+  await new Promise(r => setTimeout(r, 16));
 
   setProgress(0.7, '加载电动车…');
   const bikeRoot = await loadOne('./assets/motuo.fbx');
@@ -1727,28 +2236,34 @@ async function boot() {
   setRideBtn();
 
   setProgress(0.93, '投放邮箱…');
+  state.q.copy(pickSpawn());
+  state.gr = undefined;
+  syncBody(player, state.q, 0, state, 1);
+  updateCamera(1);                      // dt=1 让镜头一次就位，不然开局会从远处飞过来
+
+  /* 星球周长 3.8 公里，邮箱要是撒满整颗星，最近的一个平均也在四百米外，
+     一趟送信得开两分钟。全都投在出生点这片街区里，最远三百米。 */
+  const mbQ = new THREE.Quaternion(), mbU = new THREE.Vector3();
   for (let i = 0; i < 9; i++) {
-    const p = findRoadPoint(3);
-    const a = Math.random() * Math.PI * 2;
-    p.x += Math.cos(a) * 2.2;
-    p.z += Math.sin(a) * 2.2;
-    p.y = Math.max(0, heightAt(p.x, p.z));
-    state.mailboxes.push(makeMailbox(p));
+    const q = findRoadFrame(3, state.q, 300);
+    /* 从车道往路边挪一点，落在人行道上，别站在马路正中间 */
+    let ok = false;
+    for (let k = 0; k < 12 && !ok; k++) {
+      mbQ.copy(q);
+      turn(mbQ, rand(0, Math.PI * 2));
+      advance(mbQ, rand(2.4, 4.2));
+      ok = paveDir(fUp(mbQ, mbU)) && !blockedAt(mbQ, 0.6);
+    }
+    if (!ok) mbQ.copy(q);
+    turn(mbQ, rand(0, Math.PI * 2));
+    state.mailboxes.push(makeMailbox(mbQ));
+    stampOcc(mbQ, 0.5);
   }
 
   setProgress(0.96, '布置车流与街景…');
   placeParked(IS_MOBILE ? 9 : 14);
-  placeSakura(IS_MOBILE ? 12 : 20);
   await new Promise(r => setTimeout(r, 16));
 
-  const spawn = pickSpawn();
-  player.position.copy(spawn.pos);
-  state.heading = spawn.heading;
-  player.rotation.y = spawn.heading;
-  forward.set(Math.sin(spawn.heading), 0, Math.cos(spawn.heading));
-  state.camYaw = spawn.heading;
-  camera.position.set(spawn.pos.x - forward.x * 8, 4.2, spawn.pos.z - forward.z * 8);
-  camera.lookAt(spawn.pos.x, 1.2, spawn.pos.z);
   initTraffic(IS_MOBILE ? 7 : 11);
   if (/(\?|&)foot/.test(location.search)) dismount();
 
@@ -1770,18 +2285,18 @@ async function boot() {
       if (opts.jump) jumpQueued = true;
       const p0 = walker.position.clone();
       const q0 = snap();
-      let air = 0, maxY = walker.position.y;
+      let air = 0, maxH = 0;
       const n = Math.round(secs * 60);
       for (let i = 0; i < n; i++) {
         updateFoot(1 / 60);
         boy.mixer.update(1 / 60);
         if (foot.air) air += 1 / 60;
-        maxY = Math.max(maxY, walker.position.y);
+        maxH = Math.max(maxH, foot.h);
       }
       const q1 = snap();
       const bone = q0 && q1 ? (1 - Math.abs(q0.dot(q1))).toFixed(4) : 'n/a';
       res.push(`${label}: 位移${p0.distanceTo(walker.position).toFixed(2)}m 速度${foot.speed.toFixed(2)}m/s ` +
-        `动作=${boy.cur} 骨骼变化=${bone} 滞空${air.toFixed(2)}s 最高y=${(maxY - p0.y).toFixed(2)}m`);
+        `动作=${boy.cur} 骨骼变化=${bone} 滞空${air.toFixed(2)}s 最高${maxH.toFixed(2)}m`);
     };
     dismount();
     run2('走 2s', 2, {});
@@ -1798,21 +2313,50 @@ async function boot() {
     gasOn = true;
     const res = [];
     for (let t = 0; t < 6; t++) {
-      const sp = pickSpawn();
-      player.position.copy(sp.pos);
-      state.heading = sp.heading;
+      state.q.copy(pickSpawn());
+      state.gr = undefined;
       state.speed = 0;
       state.hits = 0;
+      syncBody(player, state.q, 0, state, 1);
       let dist = 0;
       const p0 = player.position.clone();
+      const before = new THREE.Vector3();
       for (let i = 0; i < 1200; i++) {
-        const before = player.position.clone();
+        before.copy(player.position);
         updatePlayer(1 / 60);
         dist += before.distanceTo(player.position);
       }
-      res.push(`#${t} 行驶${dist.toFixed(0)}m 直线${p0.distanceTo(player.position).toFixed(0)}m 撞击${state.hits}次 末速${(state.speed * 3.6).toFixed(0)}km/h`);
+      res.push(`#${t} 行驶${dist.toFixed(0)}m 直线${arcDist(p0, player.position).toFixed(0)}m ` +
+        `撞击${state.hits}次 末速${(state.speed * 3.6).toFixed(0)}km/h`);
     }
-    $('dbg').textContent = `街宽=${(state.streetW || 0).toFixed(1)}m 墙格=${state.wallCells}\n` + res.join('\n');
+    /* 再跑一遍完整任务流程：自动朝任务点打方向，看能不能取到信、送到家。
+       headless 里 requestAnimationFrame 一秒只走几帧，只能像这样同步空转。 */
+    state.autoDrive = true;
+    gasOn = false;                      // 油门交给自动驾驶，不然收不了油
+    state.q.copy(pickSpawn());
+    state.gr = undefined; state.speed = 0; state.hits = 0;
+    syncBody(player, state.q, 0, state, 1);
+    state.phase = 'pickup';
+    nextTask();
+    let got = 0, put = 0, odo = 0;
+    const prev = new THREE.Vector3();
+    for (let i = 0; i < 12000; i++) {
+      prev.copy(player.position);
+      updatePlayer(1 / 60);
+      odo += prev.distanceTo(player.position);
+      if (state.target && arcDist(player.position, state.target) < CFG.reachRadius
+        && Math.abs(state.speed) < 6) {
+        if (state.phase === 'pickup') got++; else put++;
+        reachTarget();
+      }
+    }
+    state.autoDrive = false;
+    /* 撞击次数会很高：自动驾驶是「直线追踪」，没有寻路，一路蹭着墙走。
+       只要「取信 / 送达」不是 0，就说明球面上的任务闭环是通的。 */
+    res.push(`任务 200s 取信${got} 送达${put} 里程${odo | 0}m 撞击${state.hits}次 ` +
+      `终距${state.target ? arcDist(player.position, state.target).toFixed(0) : '-'}m`);
+    $('dbg').textContent = `R=${PLANET.R.toFixed(1)} 几何体=${state.geoUnique} ` +
+      `地形三角=${((state.terrainTris || 0) / 1000) | 0}k 占用物=${state.occObjects || 0}\n` + res.join('\n');
     renderer.render(scene, camera);
     return;
   }
