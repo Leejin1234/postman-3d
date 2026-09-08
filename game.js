@@ -2,7 +2,11 @@ import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
-const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(navigator.userAgent) ||
+/* ?pc / ?mob 强制切换手机/桌面档：headless 截图和手机档的画质差别很大
+   （比如手机档城市不投影），排查画面问题时必须能指定跑哪一档。 */
+const IS_MOBILE = /(\?|&)pc(&|$)/.test(location.search) ? false
+  : /(\?|&)mob(&|$)/.test(location.search) ? true
+  : /Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(navigator.userAgent) ||
   (navigator.maxTouchPoints > 1 && Math.min(screen.width, screen.height) < 900);
 const DEBUG = /(\?|&)debug/.test(location.search);
 const AUTO = /(\?|&)auto/.test(location.search);
@@ -130,7 +134,8 @@ sun.position.set(46 * S, 86 * S, 38 * S);
 sun.castShadow = true;
 sun.shadow.mapSize.set(CFG.shadowSize, CFG.shadowSize);
 sun.shadow.bias = -0.0006;
-sun.shadow.normalBias = 0.04;
+/* 阴影范围乘了 S，一个阴影像素覆盖的世界尺寸也跟着大 S 倍，偏移量必须一起放大 */
+sun.shadow.normalBias = 0.04 * S;
 sun.shadow.radius = IS_MOBILE ? 1 : 2;
 const sc = sun.shadow.camera;
 sc.left = -CFG.shadowSpan; sc.right = CFG.shadowSpan;
@@ -173,6 +178,11 @@ function pastel(m) {
    MeshToonMaterial 会编译出几千个 program、拖垮启动。
    palette 模式针对「一格一个纯色」的调色板图集：必须用 NearestFilter，
    线性插值会把相邻色格糊在一起，模型上会出现莫名的杂色条纹。 */
+/* 模型里 City_Road 的底色是 #131417——亮度只有 7%，比沥青该有的灰暗得多。
+   赛璐璐再往上加对比（暗部乘 0.7、(c-0.5)*1.06+0.5），整条马路就压成一片死黑，
+   紧贴着饱和的绿草，看着像地上破了个洞。这里把这几个过暗的地表色抬到正常灰度。 */
+const CITY_TINT = { City_Road: 0x474c54 };
+
 const toonCache = new Map();
 function toonMat(m, opts) {
   const src = opts.map || (m && m.map) || null;
@@ -195,7 +205,9 @@ function toonMat(m, opts) {
     /* 有贴图的（Bld / Street / 树石草）颜色全在调色板图上，底色刷白；
        没贴图的（City_Road / City_Grass / City_Curb…）颜色只存在 material.color 里，
        刷白就会变成一整片惨白的地面，必须原样保留。 */
-    color: src ? 0xffffff : (m && m.color ? m.color.getHex() : 0xffffff),
+    color: src ? 0xffffff
+      : CITY_TINT[(m && m.name) || ''] !== undefined ? CITY_TINT[m.name]
+        : (m && m.color ? m.color.getHex() : 0xffffff),
     map: src,
     gradientMap: GRAD
   }));
@@ -1738,7 +1750,7 @@ function buildMiniImage() {
         Math.min(GRID.ow - 1, (u * GRID.ow / W) | 0);
       let r, gg, b;
       if (GRID.occ && GRID.occ[oi]) { r = 186; gg = 178; b = 166; }   // 楼 / 树 / 石
-      else if (GRID.surf && (GRID.surf[oi] & M_DRIVE)) { r = 38; gg = 42; b = 48; }  // 车道
+      else if (GRID.surf && (GRID.surf[oi] & M_DRIVE)) { r = 71; gg = 76; b = 84; }   // 车道，跟 CITY_TINT 一致
       else if (GRID.surf && GRID.surf[oi]) { r = 120; gg = 116; b = 106; }           // 人行道
       else if (rel > FLAT * 2) { r = 150; gg = 132; b = 104; }        // 山
       else { r = 96; gg = 118; b = 84; }                              // 草地 / 空地
@@ -2174,6 +2186,26 @@ async function boot() {
   const dd = dedupeGeometries(city);
   state.geoUnique = dd.unique;
   toonify(city, { palette: true, castShadow: !IS_MOBILE });
+  /* 地表（球壳 + 路面）不投影：球壳一个面 29 单位宽、阴影图一个像素 0.15 单位，
+     它给自己投影只会投出一片一片的脏斑（shadow acne），楼和树投影就够了。 */
+  city.traverse(o => { if (o.isMesh && TERRAIN.test(o.name)) o.castShadow = false; });
+  /* ?mat：地表按材质刷成纯色，天空藏起来、背景刷洋红。
+     地上要是真有洞，洞里会是洋红；黑斑其实是路面的话，就会变成红色。 */
+  if (/(\?|&)mat/.test(location.search)) {
+    const DC = {
+      City_Road: 0xff2200, City_RoadLine: 0xffffff, City_Sidewalk: 0x2266ff,
+      City_Curb: 0xffee00, City_Grass: 0x00cc44, City_Meadow: 0x00ffd0, City_Rock: 0xcc00ff
+    };
+    city.traverse(o => {
+      if (!o.isMesh || !TERRAIN.test(o.name)) return;
+      for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
+        if (DC[m.name] === undefined) continue;
+        m.map = null; m.color.setHex(DC[m.name]); m.needsUpdate = true;
+      }
+    });
+    sky.visible = false;
+    scene.background = new THREE.Color(0xff00ff);
+  }
   scene.add(city);
   await new Promise(r => setTimeout(r, 16));
 
