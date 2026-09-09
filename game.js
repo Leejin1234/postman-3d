@@ -85,17 +85,17 @@ sky.frustumCulled = false;
 scene.add(sky);
 
 async function loadSky() {
-  const t = await loadTex('./assets/sky-real.png');
+  const t = await loadTex('./assets/sky-day.png');
   /* 从球内侧看，等距柱面贴图左右是镜像的，翻回来 */
   t.wrapS = THREE.RepeatWrapping;
   t.repeat.x = -1; t.offset.x = 1;
-  /* 纵向要压一压。原图是「站在云海之上」的全景：蓝天占上面 45%，云海在下半张。
-     直接铺开的话地平线正好落在云海中间，而 52° 视角从地面往前看只覆盖 ±25°，
-     满屏都是那片白云海，蓝天全在头顶看不见的地方。
+  /* 纵向要压一压。原图是「站在云海之上」的全景：蓝天占上面 35%，云海在中间。
+     直接铺开的话地平线正好落在云海下沿，而 52° 视角从地面往前看只覆盖 ±25°，
+     满屏都是那片浅白云海，蓝天全在头顶看不见的地方。
      这里把 uv.y 线性拉伸（uv.y 是 1=天顶 / 0.5=地平线 / 0=天底）：
-     云海压到地平线上方 4°，抬头 41° 就到图顶那层最蓝，超出范围靠 ClampToEdge 补边。 */
+     云海压到地平线上方 4°，抬头 50° 就到图顶那层最蓝，超出范围靠 ClampToEdge 补边。 */
   t.wrapT = THREE.ClampToEdgeWrapping;
-  t.repeat.y = 2.2; t.offset.y = -0.6;
+  t.repeat.y = 1.76; t.offset.y = -0.37;
   t.anisotropy = IS_MOBILE ? 2 : 4;
   skyMat.color.setHex(0xffffff);
   skyMat.map = t;
