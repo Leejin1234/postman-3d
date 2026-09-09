@@ -67,30 +67,40 @@ renderer.shadowMap.type = IS_MOBILE ? THREE.PCFShadowMap : THREE.PCFSoftShadowMa
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0xcfe8f7, CFG.fog[0], CFG.fog[1]);
+scene.fog = new THREE.Fog(0xd9e9f9, CFG.fog[0], CFG.fog[1]);   // 雾色对着天空图地平线那条云海
 
 const camera = new THREE.PerspectiveCamera(52, 1, 0.15 * S, IS_MOBILE ? 600 : 900);
 camera.position.set(0, 6, -10);
 
-const sky = new THREE.Mesh(
-  new THREE.SphereGeometry(560, 32, 20),
-  new THREE.ShaderMaterial({
-    side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: {
-      top: { value: new THREE.Color(0x1f86cf) },
-      mid: { value: new THREE.Color(0x69bbea) },
-      bot: { value: new THREE.Color(0xcfe8f7) }
-    },
-    vertexShader: `varying float h; void main(){ vec4 w = modelMatrix*vec4(position,1.0);
-      h = normalize(position).y; gl_Position = projectionMatrix*viewMatrix*w; }`,
-    fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 bot; varying float h;
-      void main(){ float t = clamp(h,-1.0,1.0);
-        vec3 c = t > 0.17 ? mix(mid,top,smoothstep(0.17,0.86,t)) : mix(bot,mid,smoothstep(-0.05,0.17,t));
-        gl_FragColor = vec4(c,1.0); }`
-  })
-);
+/* 天空球：一张 2:1 全景图直接当等距柱面贴图铺在球内壁上。
+   贴图是异步加载的，所以先给个和图里天顶差不多的蓝当兜底色，
+   加载完再挂上 map —— 万一图挂了，天还是蓝的，不会变成一片黑。
+   每帧还会把球对齐到玩家脚下的「上」方向（见 loop 里的 sky.quaternion），
+   这样不管跑到星球哪一面，云海都压在地平线上。 */
+const skyMat = new THREE.MeshBasicMaterial({
+  color: 0x6fb2e8, side: THREE.BackSide, depthWrite: false, fog: false
+});
+const sky = new THREE.Mesh(new THREE.SphereGeometry(560, 48, 32), skyMat);
 sky.frustumCulled = false;
 scene.add(sky);
+
+async function loadSky() {
+  const t = await loadTex('./assets/sky-day.png');
+  /* 从球内侧看，等距柱面贴图左右是镜像的，翻回来 */
+  t.wrapS = THREE.RepeatWrapping;
+  t.repeat.x = -1; t.offset.x = 1;
+  /* 纵向要压一压。原图是「站在云海之上」的全景：蓝天占上面 35%，云海在中间。
+     直接铺开的话地平线正好落在云海下沿，而 52° 视角从地面往前看只覆盖 ±25°，
+     满屏都是那片浅白云海，蓝天全在头顶看不见的地方。
+     这里把 uv.y 线性拉伸（uv.y 是 1=天顶 / 0.5=地平线 / 0=天底）：
+     云海压到地平线上方 4°，抬头 50° 就到图顶那层最蓝，超出范围靠 ClampToEdge 补边。 */
+  t.wrapT = THREE.ClampToEdgeWrapping;
+  t.repeat.y = 1.76; t.offset.y = -0.37;
+  t.anisotropy = IS_MOBILE ? 2 : 4;
+  skyMat.color.setHex(0xffffff);
+  skyMat.map = t;
+  skyMat.needsUpdate = true;
+}
 
 function cloudTexture() {
   const cv = document.createElement('canvas');
@@ -2191,6 +2201,8 @@ async function boot() {
     setTip('本机缓存不可用（需要 https 打开），每次都要重新下载');
   }
   setProgress(0.03, '加载星球城市…');
+  /* 天空贴图和城市并行下（1.4MB，不占进度条），失败也不拦着开局 */
+  const skyReady = loadSky().catch(e => console.warn('天空贴图加载失败', e));
   /* 贴图不用手动指定：FBXLoader 会把模型里的贴图引用去掉 Windows 路径，
      然后到 ./assets/ 下找 Textures.png 和 texture_gradient.png */
   const city = await loadOne('./assets/planet-city.fbx', f => setProgress(0.03 + f * 0.40));
@@ -2334,6 +2346,7 @@ async function boot() {
 
   setProgress(0.96, '布置车流与街景…');
   placeParked(IS_MOBILE ? 9 : 14);
+  await skyReady;
   await new Promise(r => setTimeout(r, 16));
 
   initTraffic(IS_MOBILE ? 7 : 11);

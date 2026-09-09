@@ -44,6 +44,12 @@
  网址后加 ?fx       循环播放取信/送达动效（测试用）
 
 【画面风格】
+ 天空是一颗半径 560 米的反面球，贴 assets/sky-day.png（2:1 全景图，等距柱面）。
+ 球每帧对齐到玩家脚下的「上」方向，所以跑到星球哪一面云海都压在地平线上。
+ 从球内侧看贴图左右是镜像的（repeat.x=-1 翻回来）；纵向要拉伸 1.76 倍：
+ 原图是「站在云海之上」的构图，蓝天只占上面 35%，直铺的话 52° 视角从地面往前看
+ 满屏都是浅白云海、蓝天全在头顶看不见的地方。拉伸后云海压在地平线上方 4°、
+ 抬头 50° 就到最蓝那层，超出范围用 ClampToEdge 补边。
  赛璐璐动画风：硬边三段明暗（NearestFilter 分色带）+ 反向壳描边。
  描边前会把低多边形的分面法线按顶点位置焊接平均一次（aHull 属性），
  否则沿法线挤出的壳会在每个棱角处裂开露缝。
@@ -107,6 +113,7 @@
 
 【资源】
  assets/planet-city.fbx + Textures.png + texture_gradient.png  星球城市
+ assets/sky-day.png                                天空球全景图（2:1 等距柱面）
  assets/motuo.fbx + motuo_basecolor.jpg            电动车
  assets/boy-final.fbx + boy-final_basecolor.jpg    邮差（自带 sit/walk/run/jump/wait 动画）
  assets/ui/*.png                                   HUD 图标（头像 / 油门 / 刹车 / 底部按钮）
