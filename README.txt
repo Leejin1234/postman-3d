@@ -108,12 +108,22 @@
 
 【街景】
  路上有自动行驶的车流（会避让、路口转向），路边有停靠车辆；
+ 车用 assets/car-city.fbx 里的 63 个车款（轿车 / 面包 / 皮卡 / 校车 / 加长车），
+ 每次随机挑一款。资源里 63 辆车一排排摆在原点旁边，长轴朝 +Z、车头也在 +Z 那端，
+ 正好对上车流逻辑的 fFwd，只需把每辆搬回原点（XZ 居中、轮胎贴 y=0）。
+ 缩放是「普通轿车 356 单位 = 3.9 个身位」的统一系数，不逐辆归一化车长——
+ 那样校车和加长车会被压成轿车大小，街上就成了一个尺码。
+ 车的贴图就是城市那张 Textures.png（FBX 里写的相对路径是 textures\，
+ FBXLoader 找不到），启动时从城市材质上顺一份图集手动喂给它，省一次 4MB 下载。
  星球本身自带 1141 棵树和 945 丛草，所以不再额外种树。
  撞到行驶车辆会被弹开并减速。取信时信封飞入 HUD，送达时金币飘字。
+ view-car.html 是车款陈列架：?v=top 俯视看轮廓，?max=6&cols=3 看细节，
+ 每辆车 +Z 端插一根红针，用来核对车头朝向。
 
 【资源】
  assets/planet-city.fbx + Textures.png + texture_gradient.png  星球城市
  assets/sky-day.png                                天空球全景图（2:1 等距柱面）
+ assets/car-city.fbx                               63 个汽车车款（贴图共用 Textures.png）
  assets/motuo.fbx + motuo_basecolor.jpg            电动车
  assets/boy-final.fbx + boy-final_basecolor.jpg    邮差（自带 sit/walk/run/jump/wait 动画）
  assets/ui/*.png                                   HUD 图标（头像 / 油门 / 刹车 / 底部按钮）

@@ -342,30 +342,43 @@ function mergeParts(parts) {
   return g;
 }
 
-const CAR_PAINTS = [0xf2f3f5, 0x69b7c7, 0xd95f4b, 0x7f9fd1, 0x9dc98f, 0xf2f3f5];
-const carGeoCache = new Map();
-function carGeo(paintHex, taxi) {
-  const key = paintHex + (taxi ? '_t' : '');
-  if (carGeoCache.has(key)) return carGeoCache.get(key);
-  const parts = [
-    pbox(1.72, 0.55, 3.8, 0, 0.62, 0, paintHex),
-    pbox(1.5, 0.5, 1.85, 0, 1.12, -0.12, 0x2c3644),
-    pbox(1.52, 0.09, 1.6, 0, 1.4, -0.12, paintHex),
-    pbox(0.3, 0.12, 0.06, -0.55, 0.72, 1.92, 0xfff2b0),
-    pbox(0.3, 0.12, 0.06, 0.55, 0.72, 1.92, 0xfff2b0),
-    pbox(0.3, 0.12, 0.06, -0.55, 0.72, -1.92, 0xd23b32),
-    pbox(0.3, 0.12, 0.06, 0.55, 0.72, -1.92, 0xd23b32),
-    pcyl(0.33, 0.33, 0.26, 10, -0.8, 0.33, 1.25, 0x22262c, Math.PI / 2),
-    pcyl(0.33, 0.33, 0.26, 10, 0.8, 0.33, 1.25, 0x22262c, Math.PI / 2),
-    pcyl(0.33, 0.33, 0.26, 10, -0.8, 0.33, -1.25, 0x22262c, Math.PI / 2),
-    pcyl(0.33, 0.33, 0.26, 10, 0.8, 0.33, -1.25, 0x22262c, Math.PI / 2)
-  ];
-  if (taxi) parts.push(pbox(0.5, 0.16, 0.24, 0, 1.52, -0.12, 0xfff6d8));
-  const g = mergeParts(parts);
-  g.scale(S, S, S);                     // 自造的车也要按巨人尺度放大
-  carGeoCache.set(key, g);
-  return g;
+/* ---------- 汽车车款（城市资源包 car-city.fbx，63 款共用城市那张调色板图集） ----------
+   资源里 63 辆车一排排摆在原点旁边，长轴已经朝 +Z、车头也在 +Z 那端，
+   正好对上车流逻辑的 fFwd。这里把每辆搬回原点（XZ 居中、轮胎贴 y=0），
+   再统一乘同一个系数——「普通轿车 356 单位 = 3.9 个身位」。
+   不逐辆归一化车长：那样校车、加长车会被压成轿车大小，街上全是一个尺码。 */
+const CAR_UNIT = 3.9 * S / 356;
+const carVariants = [];
+let CAR_MAT = VC_MAT;
+function buildCars(root, atlas) {
+  /* 车的贴图就是城市那张图集（textures\Textures.png，和 assets/Textures.png 同一份文件）。
+     FBX 里写的是相对路径，FBXLoader 会去找 ./assets/textures/ 找不到，所以这里手动喂给它。 */
+  toonify(root, { palette: true, map: atlas });
+  root.updateMatrixWorld(true);
+  const ctr = new THREE.Vector3();
+  root.traverse(o => {
+    if (!o.isMesh || !o.geometry) return;
+    CAR_MAT = Array.isArray(o.material) ? o.material[0] : o.material;
+    let g = o.geometry.clone();
+    for (const k in g.attributes) if (k !== 'position' && k !== 'normal' && k !== 'uv') g.deleteAttribute(k);
+    g.morphAttributes = {};
+    if (!g.attributes.uv) {
+      /* 停靠车要合并成一个网格：属性表必须齐整，缺 UV 的补一份空的 */
+      g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+    }
+    g.applyMatrix4(o.matrixWorld);
+    if (g.index) g = g.toNonIndexed();   // 停靠车要合并成一个网格，索引状态必须一致
+    g.computeBoundingBox();
+    g.boundingBox.getCenter(ctr);
+    g.translate(-ctr.x, -g.boundingBox.min.y, -ctr.z);
+    /* 万一某个车款的长轴摆在 X 上，转 90° 掰回 +Z，不然它会横着在路上开 */
+    if (g.boundingBox.max.x - g.boundingBox.min.x > g.boundingBox.max.z - g.boundingBox.min.z) g.rotateY(Math.PI / 2);
+    g.scale(CAR_UNIT, CAR_UNIT, CAR_UNIT);
+    g.computeBoundingBox();
+    carVariants.push(g);
+  });
 }
+function carGeo() { return carVariants[(Math.random() * carVariants.length) | 0]; }
 
 /* ---------- 最近墙面方向与距离（贴边停车用） ---------- */
 const _wpQ = new THREE.Quaternion();
@@ -416,15 +429,14 @@ function placeParked(n) {
     if (placed.some(p => p.distanceTo(pos) < 6 * S)) continue;
     if (state.mailboxes.some(mb => mb.position.distanceTo(pos) < 4 * S)) continue;
     placed.push(pos.clone());
-    const taxi = Math.random() < 0.25;
-    const g = carGeo(taxi ? 0xffc63a : CAR_PAINTS[(Math.random() * CAR_PAINTS.length) | 0], taxi).clone();
+    const g = carGeo().clone();
     g.applyMatrix4(frameMatrix(q, 0, m));
     geos.push(g);
     stampOcc(q, 1.1 * S);
     i++;
   }
   if (!geos.length) return;
-  const mesh = new THREE.Mesh(mergeParts(geos), VC_MAT);
+  const mesh = new THREE.Mesh(mergeParts(geos), CAR_MAT);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   addOutline(mesh, 0.015 * S);
@@ -463,9 +475,7 @@ function spawnCar(c, nearQ) {
 }
 function initTraffic(n) {
   for (let i = 0; i < n; i++) {
-    const taxi = Math.random() < 0.3;
-    const mesh = new THREE.Mesh(
-      carGeo(taxi ? 0xffc63a : CAR_PAINTS[(Math.random() * CAR_PAINTS.length) | 0], taxi), VC_MAT);
+    const mesh = new THREE.Mesh(carGeo(), CAR_MAT);
     mesh.castShadow = true;
     addOutline(mesh, 0.015 * S);
     scene.add(mesh);
@@ -2210,6 +2220,12 @@ async function boot() {
   const dd = dedupeGeometries(city);
   state.geoUnique = dd.unique;
   toonify(city, { palette: true, castShadow: !IS_MOBILE });
+  /* 城市那张调色板图集：汽车模型也用它上色，从这里顺一份，省一次 4MB 下载 */
+  let atlas = null;
+  city.traverse(o => {
+    if (atlas || !o.isMesh) return;
+    for (const m of (Array.isArray(o.material) ? o.material : [o.material])) if (m.map) { atlas = m.map; break; }
+  });
   /* 地表要单独处理两件事：
      一是 Roads 那层里有一半三角形绕序朝内（法线也跟着朝内，是模型自带的毛病），
      单面渲染会把它们整片剔掉，路面就一条条露出下面 2 米处的草地，看着像镂空破洞，
@@ -2271,6 +2287,10 @@ async function boot() {
   bikeMesh.receiveShadow = true;
   bikeHolder.add(bikeMesh);
   addOutline(bikeHolder, 0.021 * S);
+
+  setProgress(0.78, '加载汽车…');
+  const carRoot = await loadOne('./assets/car-city.fbx', f => setProgress(0.78 + f * 0.06));
+  buildCars(carRoot, atlas);
 
   setProgress(0.85, '加载骑手…');
   const boyRoot = await loadOne('./assets/boy-final.fbx');
