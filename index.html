@@ -17,7 +17,8 @@
 * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
 html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavior:none; touch-action:none;
             font-family:"PingFang SC","Microsoft YaHei",sans-serif; }
-#stage { position:relative; width:100vw; height:100vh; height:100dvh; max-width:calc(100dvh * 9 / 16);
+/* 横屏游戏：舞台铺满视口，超宽屏（折叠屏 / 平板）按 16:9 收一收，两侧留黑边 */
+#stage { position:relative; width:100vw; height:100vh; height:100dvh; max-width:calc(100dvh * 16 / 9);
          margin:0 auto; overflow:hidden; }
 #stage canvas#gl { display:block; width:100%; height:100%; }
 .hud { position:absolute; inset:0; pointer-events:none; user-select:none; }
@@ -59,56 +60,57 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
       text-shadow:0 2px 6px rgba(0,0,0,.35); z-index:5; }
 .fx.pop { font-size:19px; font-weight:800; color:#ffb42e; text-shadow:0 2px 0 #7a4a00,0 3px 8px rgba(0,0,0,.4); }
 
-#mini { position:absolute; right:10px; top:86px; width:96px; height:96px; border-radius:12px;
+#mini { position:absolute; right:10px; top:76px; width:88px; height:88px; border-radius:12px;
         border:2px solid rgba(255,255,255,.85); background:rgba(20,30,40,.55); }
-.compass { position:absolute; right:10px; top:188px; width:96px; text-align:center; color:#fff; font-size:11px;
+.compass { position:absolute; right:10px; top:170px; width:88px; text-align:center; color:#fff; font-size:11px;
            text-shadow:0 1px 3px rgba(0,0,0,.6); }
-.compass .arw { font-size:26px; display:block; line-height:1; }
+.compass .arw { font-size:24px; display:block; line-height:1; }
 
-.speed { position:absolute; right:10px; bottom:180px; background:rgba(0,0,0,.42); color:#fff; border-radius:10px;
+/* 横屏底部一条：左摇杆、中间三个入口、右油门刹车。竖屏那套「叠三层」在
+   400 多像素高的横屏里会一路顶到状态栏上，所以全部压到屏幕最下面一行。 */
+.speed { position:absolute; right:96px; bottom:116px; background:rgba(0,0,0,.42); color:#fff; border-radius:10px;
          padding:5px 9px; font-size:10px; text-align:center; line-height:1.3; }
 .speed b { font-size:18px; }
-.hint { position:absolute; left:12px; bottom:200px; color:#fff; font-size:11px; opacity:.85; line-height:1.5;
+.hint { position:absolute; left:12px; bottom:140px; color:#fff; font-size:11px; opacity:.85; line-height:1.5;
         text-shadow:0 1px 3px rgba(0,0,0,.6); }
 
-/* 三个入口改到右侧竖排，落在「下车」按钮上方 */
-.bottom { position:absolute; right:14px; bottom:250px; left:auto; display:flex;
-          flex-direction:column; align-items:center; gap:6px; }
+.bottom { position:absolute; left:50%; right:auto; bottom:12px; transform:translateX(-50%); display:flex;
+          flex-direction:row; align-items:flex-end; gap:10px; }
 .bbtn { width:76px; height:58px; border-radius:14px; background:linear-gradient(180deg,#ffd98a,#ffb347);
         border:3px solid #fff; box-shadow:0 4px 0 #d98b20,0 4px 10px rgba(0,0,0,.3);
         display:flex; flex-direction:column; align-items:center; justify-content:center; }
 .bbtn:active { transform:translateY(2px); }
 .bbtn em { font-size:20px; font-style:normal; line-height:1; }
 .bbtn span { font-size:12px; font-weight:800; color:#6b4310; margin-top:2px; }
-.bbtn img { height:76px; display:block; }
+.bbtn img { height:64px; display:block; }
 .bbtn.img { width:auto; height:auto; padding:0; background:none; border:none; box-shadow:none;
             filter:drop-shadow(0 3px 5px rgba(0,0,0,.35)); }
 .bbtn.img:active { transform:scale(.93); }
 .bbtn.img em, .bbtn.img span { display:none; }
 
-.stick { position:absolute; left:16px; bottom:88px; width:104px; height:104px; border-radius:50%;
+.stick { position:absolute; left:16px; bottom:22px; width:100px; height:100px; border-radius:50%;
          background:rgba(255,255,255,.16); border:2px solid rgba(255,255,255,.5); }
-.stick i { position:absolute; left:50%; top:50%; width:46px; height:46px; margin:-23px 0 0 -23px; border-radius:50%;
+.stick i { position:absolute; left:50%; top:50%; width:44px; height:44px; margin:-22px 0 0 -22px; border-radius:50%;
            background:rgba(255,255,255,.78); box-shadow:0 2px 6px rgba(0,0,0,.3); }
-.gas { position:absolute; right:16px; bottom:88px; width:74px; height:74px; border-radius:50%;
+.gas { position:absolute; right:16px; bottom:22px; width:74px; height:74px; border-radius:50%;
        background:rgba(255,180,46,.88); border:3px solid #fff; color:#fff; font-size:14px; font-weight:800;
        display:flex; align-items:center; justify-content:center; box-shadow:0 3px 8px rgba(0,0,0,.3); }
 .gas:active { background:rgba(255,140,20,.95); }
 .gas.img:active, .brake.img:active { transform:scale(.93); }
-#btnRide { position:absolute; right:16px; bottom:184px; width:56px; height:56px; border-radius:50%;
-           background:rgba(255,255,255,.92); border:3px solid #ff9d2e; color:#c25b00; font-size:14px;
+#btnRide { position:absolute; right:16px; bottom:112px; width:52px; height:52px; border-radius:50%;
+           background:rgba(255,255,255,.92); border:3px solid #ff9d2e; color:#c25b00; font-size:13px;
            font-weight:800; display:flex; align-items:center; justify-content:center;
            box-shadow:0 3px 8px rgba(0,0,0,.3); }
 #btnRide:active { transform:scale(.93); }
-.brake { position:absolute; right:100px; bottom:98px; width:56px; height:56px; border-radius:50%;
+.brake { position:absolute; right:100px; bottom:30px; width:54px; height:54px; border-radius:50%;
          background:rgba(60,70,80,.7); border:3px solid #fff; color:#fff; font-size:12px; font-weight:800;
          display:flex; align-items:center; justify-content:center; }
 .gas img, .brake img { width:100%; height:100%; display:block; }
 .bbtn img, .gas img, .brake img { pointer-events:none; }
 .gas.img, .brake.img { background:none; border:none; box-shadow:none; font-size:0;
                        filter:drop-shadow(0 3px 6px rgba(0,0,0,.35)); }
-.gas.img { width:80px; height:80px; }
-.brake.img { width:60px; height:60px; right:104px; bottom:100px; }
+.gas.img { width:78px; height:78px; }
+.brake.img { width:58px; height:58px; right:102px; bottom:32px; }
 
 .toast { position:absolute; top:40%; left:50%; transform:translate(-50%,-50%) scale(.9); opacity:0;
          background:rgba(0,0,0,.75); color:#fff; padding:10px 18px; border-radius:20px; font-size:15px;
@@ -117,7 +119,7 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
 
 .mask { position:absolute; inset:0; background:rgba(0,0,0,.45); display:none; }
 .mask.on { display:block; }
-.panel { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:82%; background:#fff7ec;
+.panel { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:min(82%,400px); background:#fff7ec;
          border:4px solid #fff; border-radius:18px; padding:14px; box-shadow:0 8px 24px rgba(0,0,0,.4); }
 .panel h3 { font-size:16px; color:#6b4310; margin-bottom:10px; text-align:center; }
 .panel .list { display:flex; flex-wrap:wrap; gap:8px; }
@@ -149,24 +151,35 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
 #start button:active { transform:translateY(3px); box-shadow:0 3px 0 #d8781a; }
 #rotate { position:absolute; inset:0; z-index:11; display:none; align-items:center; justify-content:center;
           background:#0f1418; color:#fff; font-size:15px; letter-spacing:1px; }
-@media (orientation:landscape) and (max-height:520px) { #rotate { display:flex; } }
-@media (max-width:430px) {
-  .topbar { gap:6px; }
-  .avatar { width:56px; height:56px; }
-  .pname { font-size:16px; }
-  .lvbar { width:92px; }
-  .lvbadge { width:22px; height:22px; font-size:12px; }
+/* 竖着拿就挡住：横屏才有地方摆「左摇杆 + 右油门」。平板竖屏（宽 > 520）不拦，
+   那种尺寸竖着也够用。 */
+@media (orientation:portrait) and (max-width:520px) { #rotate { display:flex; } }
+/* 横屏矮屏（多数手机横过来就是 380~430 高）：把头像、小地图、按钮整体收一档 */
+@media (max-height:430px) {
+  .topbar { gap:6px; top:8px; }
+  .avatar { width:52px; height:52px; }
+  .pname { font-size:15px; }
+  .lvbar { width:92px; height:9px; }
+  .lvbadge { width:20px; height:20px; font-size:11px; }
+  .lvtxt { display:none; }
   .res { font-size:11px; padding:2px 6px 2px 4px; }
   .res .ic { width:16px; height:16px; }
   .res .plus { display:none; }
   .gear { width:28px; height:28px; font-size:15px; }
-  .taskbar, #mini { top:78px; }
-  .compass { top:180px; }
-  .bbtn img { height:66px; }
-  .bottom { bottom:234px; right:10px; }
-  #btnRide { width:50px; height:50px; font-size:13px; bottom:174px; }
-  .gas.img { width:74px; height:74px; }
-  .brake.img { width:56px; height:56px; }
+  .taskbar { top:66px; padding:6px 8px; max-width:44%; }
+  .tasktxt span { display:none; }
+  #mini { top:66px; width:76px; height:76px; }
+  .compass { top:146px; width:76px; font-size:10px; }
+  .compass .arw { font-size:20px; }
+  .bbtn img { height:54px; }
+  .bottom { bottom:8px; gap:8px; }
+  #btnRide { width:46px; height:46px; font-size:12px; bottom:96px; }
+  .speed { right:84px; bottom:100px; }
+  .hint { bottom:120px; font-size:10px; }
+  .stick { width:86px; height:86px; bottom:16px; }
+  .stick i { width:38px; height:38px; margin:-19px 0 0 -19px; }
+  .gas.img { width:68px; height:68px; }
+  .brake.img { width:50px; height:50px; right:88px; bottom:28px; }
 }
 </style>
 <script type="importmap">
@@ -210,7 +223,7 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
 
     <div class="speed">速度<br><b id="spd">0</b> km/h</div>
     <div class="hint" id="hint">左摇杆转向 · 右侧油门/刹车</div>
-    <div id="dbg" style="position:absolute;left:8px;top:200px;max-width:70%;color:#fff;font-size:10px;line-height:1.5;
+    <div id="dbg" style="position:absolute;left:8px;top:118px;max-width:58%;color:#fff;font-size:10px;line-height:1.5;
          text-shadow:0 1px 2px #000;white-space:pre-wrap;"></div>
 
     <div class="stick" id="stick"><i id="knob"></i></div>
@@ -241,9 +254,9 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
     <h1>小 邮 差</h1>
     <p>骑上电动车绕着星球小城送信<br>去红色邮箱取信，再送到绿色光柱</p>
     <button id="btnStart">开 始 送 信</button>
-    <p style="font-size:11px;opacity:.75">建议竖屏 · 支持全屏 · 可添加到主屏幕</p>
+    <p style="font-size:11px;opacity:.75">建议横屏 · 支持全屏 · 可添加到主屏幕</p>
   </div>
-  <div id="rotate">请竖屏体验 🙃</div>
+  <div id="rotate">请横屏体验 🙃</div>
 </div>
 <script>
 (function () {

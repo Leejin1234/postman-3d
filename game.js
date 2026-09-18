@@ -55,7 +55,8 @@ const state = {
   speed: 0, tris: 0,
   onBike: true,
   /* 骑手所在的球面 frame（位置 + 朝向合一），以及镜头相对朝向的偏角 */
-  q: new THREE.Quaternion(), camOff: 0
+  q: new THREE.Quaternion(), camOff: 0,
+  rs: {}                                // 车流重投原因计数（?cartest 用）
 };
 
 /* ---------- renderer / scene ---------- */
@@ -446,17 +447,44 @@ function placeParked(n) {
 /* ---------- 路上车流 ---------- */
 const traffic = [];
 const CAR_SPEED = 6.5 * S;
+/* 车流只准待在车道上。占用图只挡楼和树，草坪、广场、人行道在它眼里全是空地，
+   所以光用 dirClear 探路的车会一头开进草地。这里前方每 1.6 个身位取一点，
+   既查障碍也查车道掩码，横向留 0.9 个身位的余量（掩码格 1.2 单位、车宽 5 单位）。
+   注意起点从 1.6 个身位算，不查车自己脚下：车贴着路边线走时脚下那一圈本来就压线，
+   连自己脚下一起查会让四个方向全判不通、原地卡死，压测里出现过 300 秒重投 4 万次。 */
+const LANE_R = 0.9 * S;
+/* ?nolane 关掉车道约束（只剩障碍探路），用来对比「车是被车道卡住的还是本来就慢」 */
+const LANE_FREE = /(\?|&)nolane/.test(location.search);
+const _lcQ = new THREE.Quaternion(), _olU = new THREE.Vector3();
+function laneClear(q, dist) {
+  _lcQ.copy(q);
+  for (let d = 1.6 * S; d <= dist; d += 1.6 * S) {
+    advance(_lcQ, 1.6 * S);
+    if (blockedAt(_lcQ, 1.05 * S)) return false;
+    if (!LANE_FREE && !driveAt(_lcQ, LANE_R)) return false;
+  }
+  return true;
+}
+/* 落位硬闸门：只看车心那一格在不在车道上。这条不带横向余量，
+   探路负责「早点转弯别贴边」，这里只负责「车心一步都不许离开路面」。 */
+function onLane(q) { return LANE_FREE || driveDir(fUp(q, _olU)); }
 const _scPos = new THREE.Vector3(), _scNear = new THREE.Vector3();
-function spawnCar(c, nearQ) {
+function spawnCar(c, nearQ, why) {
+  state.carResp = (state.carResp || 0) + 1;
+  if (why) state.rs[why] = (state.rs[why] || 0) + 1;
   if (nearQ) framePos(nearQ, 0, _scNear);
   for (let i = 0; i < 30; i++) {
     const q = findRoadFrame(2.4 * S, nearQ, nearQ ? 95 * S : 0);
     framePos(q, 0, _scPos);
     if (nearQ && _scPos.distanceTo(_scNear) < 14 * S) continue;
-    /* 找一个能往前开一段的朝向 */
+    /* 太远的也不要：findRoadFrame 在这一圈里凑不出车道时会退回北极那个兜底 frame，
+       那位置离玩家半个星球远，落位后立刻又触发「太远重投」，一帧一次死循环——
+       压测里 300 秒空转出过 3 万次重投。 */
+    if (nearQ && _scPos.distanceTo(_scNear) > 105 * S) continue;
+    /* 找一个「顺着车道」能往前开一段的朝向，四个方向都不顺就换地方 */
     let ok = false;
     for (let k = 0; k < 4; k++) {
-      if (dirClear(q, 12 * S)) { ok = true; break; }
+      if (laneClear(q, 8 * S)) { ok = true; break; }
       turn(q, Math.PI / 2);
     }
     if (!ok) continue;
@@ -506,18 +534,37 @@ const _tFwd = new THREE.Vector3(), _tD = new THREE.Vector3();
 function updateTraffic(dt) {
   const fq = focusFrame(), fp = focusPos();
   for (const c of traffic) {
-    if (!c.alive) continue;
+    if (!c.alive) {
+      /* spawnCar 一次找不到位置会把车收起来（alive=false）。这里隔一秒再试一次，
+         否则街上的车只会越跑越少，最后一辆不剩。 */
+      c.wait = (c.wait || 0) + dt;
+      if (c.wait > 1) { c.wait = 0; spawnCar(c, fq, 'retry'); }
+      continue;
+    }
     let want = CAR_SPEED;
-    if (!dirClear(c.q, 5.2 * S)) {
+    c.why = 'go';
+    if (!laneClear(c.q, 5.2 * S)) {
+      /* 前面到头了（撞上障碍，或者车道在这儿拐弯 / 结束）：先试左右两条车道 */
       _tq1.copy(c.q); turn(_tq1, Math.PI / 2);
       _tq2.copy(c.q); turn(_tq2, -Math.PI / 2);
-      if (dirClear(_tq1, 8 * S)) c.q.copy(_tq1);
-      else if (dirClear(_tq2, 8 * S)) c.q.copy(_tq2);
-      else want = 0;
+      if (laneClear(_tq1, 8 * S)) c.q.copy(_tq1);
+      else if (laneClear(_tq2, 8 * S)) c.q.copy(_tq2);
+      else {
+        /* 三面都出车道就掉头。掉头也不行才算真困住——不掉头的话车会顶着草地
+           一直等，路口边上停一排不动的车。 */
+        _tq1.copy(c.q); turn(_tq1, Math.PI);
+        if (laneClear(_tq1, 8 * S)) c.q.copy(_tq1);
+        else {
+          want = 0;
+          c.why = 'lane';
+          c.stuck += dt;
+          if (c.stuck > 2.5) { spawnCar(c, fq, 'lane'); continue; }
+        }
+      }
     } else if (Math.random() < dt * 0.25) {
       _tq1.copy(c.q);
       turn(_tq1, Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2);
-      if (dirClear(_tq1, 9 * S)) c.q.copy(_tq1);
+      if (laneClear(_tq1, 9 * S)) c.q.copy(_tq1);
     }
 
     const cp = c.mesh.position;
@@ -525,10 +572,10 @@ function updateTraffic(dt) {
     for (const o of traffic) {
       if (o === c || !o.alive) continue;
       _tD.copy(o.mesh.position).sub(cp);
-      if (_tD.dot(_tFwd) > 0.5 && _tD.lengthSq() < 16 * S * S) { want = 0; break; }
+      if (_tD.dot(_tFwd) > 0.5 && _tD.lengthSq() < 16 * S * S) { want = 0; c.why = 'car'; break; }
     }
     _tD.copy(fp).sub(cp);
-    if (_tD.dot(_tFwd) > 0.3 && _tD.lengthSq() < 14 * S * S) want = 0;
+    if (_tD.dot(_tFwd) > 0.3 && _tD.lengthSq() < 14 * S * S) { want = 0; c.why = 'you'; }
 
     c.v += clamp(want - c.v, -9 * S * dt, 2.5 * S * dt);
     if (c.v > 0.05) {
@@ -536,15 +583,21 @@ function updateTraffic(dt) {
       advance(_tq1, c.v * dt);
       _tq2.copy(_tq1);
       advance(_tq2, 1.9 * S);
-      if (!blockedAt(_tq2, 0.95 * S)) { c.q.copy(_tq1); c.stuck = 0; }
+      /* 真正落位前再确认一次：往前 1.9 个身位既不撞东西、也还在车道上。
+         这一步是硬闸门，前面的探路只影响转向，出车道的位移一律不许提交。 */
+      if (!blockedAt(_tq2, 0.95 * S) && onLane(_tq2)) { c.q.copy(_tq1); c.stuck = 0; }
       else {
         c.v = 0;
+        c.why = 'wall';
         c.stuck += dt;
-        if (c.stuck > 2.5) { spawnCar(c, fq); continue; }
+        if (c.stuck > 2.5) { spawnCar(c, fq, 'wall'); continue; }
       }
     }
     framePos(c.q, 0, cp);
     c.mesh.quaternion.slerp(c.q, Math.min(1, dt * 7));
+    /* 车流健康度：全时段平均速度 + 重投次数。只看瞬时速度会被「刚重投完在加速」骗过去 */
+    state.carVs = (state.carVs || 0) + c.v * dt;
+    state.carTs = (state.carTs || 0) + dt;
 
     const dd = cp.distanceTo(fp);
     if (dd < 2.1 * S && dd > 0.01) {
@@ -555,7 +608,7 @@ function updateTraffic(dt) {
         toast('小心车辆！');
       }
     }
-    if (dd > 115 * S) spawnCar(c, fq);
+    if (dd > 115 * S) spawnCar(c, fq, 'far');
   }
 }
 
@@ -2190,10 +2243,22 @@ function loop() {
     state.dbgT = time;
     const r = renderer.info.render;
     const cd = countDrawn(scene, { n: 0, g: 0, s: 0 });
+    /* 车流有没有跑出车道：alive 的车逐个查一下自己脚下的车道掩码，
+       分母是活着的车。正常应该一直是 n/n，出现 x/n 就是有车压上草地了。 */
+    let carN = 0, carOn = 0;
+    const carWhy = {};
+    for (const c of traffic) {
+      if (!c.alive) continue;
+      carN++;
+      if (driveAt(c.q, LANE_R)) carOn++;
+      carWhy[c.why || '-'] = (carWhy[c.why || '-'] || 0) + 1;
+    }
     $('dbg').textContent = `draw=${r.calls} tri=${(r.triangles / 1000) | 0}k fps=${(1 / Math.max(dt, 0.001)) | 0}\n` +
       `R=${groundR(_lpU).toFixed(1)}/${PLANET.R.toFixed(0)} 方位=${(frameBearing(focusFrame()) * 57.3).toFixed(0)}°` +
       ` ${state.onBike ? '骑车' : '步行 ' + boy.cur} 地平线内=${state.hzOn}/${horizon.length}\n` +
       `提交=${cd.n} 分组=${cd.g} 投影=${cd.s} 速=${(focusSpeed() * 3.6).toFixed(0)} 撞=${state.hits || 0}` +
+      ` 车流在道=${carOn}/${carN}@${(state.carVs / Math.max(0.01, state.carTs) * 3.6 / S).toFixed(0)}km/h ` +
+      Object.keys(carWhy).map(k => k + ':' + carWhy[k]).join(' ') + ` 重投=${state.carResp || 0}` +
       ` 里程=${(state.odo || 0).toFixed(0)}m/${time.toFixed(0)}s`;
   }
   drawMini();
@@ -2466,6 +2531,37 @@ async function boot() {
     return;
   }
 
+  /* ?cartest：车道约束的同步压测。headless 里 rAF 一秒只走几帧
+     （HUD 上 696 秒也只推进了不到 1 秒的物理），光看那行「车流在道」
+     测到的永远是刚出生那一瞬间，必须像 selftest 一样空转步进。 */
+  if (/(\?|&)cartest/.test(location.search)) {
+    const N = 9000, step = 1 / 30;
+    let mid = 0, wide = 0, samples = 0, vsum = 0, worst = 0;
+    const resp0 = state.carResp || 0;
+    const u = new THREE.Vector3();
+    for (let i = 0; i < N; i++) {
+      updateTraffic(step);
+      let bad = 0;
+      for (const c of traffic) {
+        if (!c.alive) continue;
+        samples++; vsum += c.v;
+        if (!driveDir(fUp(c.q, u))) { mid++; bad++; }        // 车心在不在车道上
+        if (!driveAt(c.q, 1.6 * S)) wide++;                  // 半个车身范围全在车道上吗
+      }
+      if (bad > worst) worst = bad;
+    }
+    $('dbg').textContent =
+      `车流压测 ${(N * step).toFixed(0)}s × ${traffic.length} 辆  采样 ${samples} 次` +
+      (LANE_FREE ? '  ?nolane 已关闭车道约束' : '') + '\n' +
+      `车心出车道 ${mid} 次 (${(mid / samples * 100).toFixed(2)}%)  同一帧最多 ${worst} 辆\n` +
+      `半车身出车道 ${wide} 次 (${(wide / samples * 100).toFixed(2)}%)\n` +
+      `平均速度 ${(vsum / samples * 3.6 / S).toFixed(1)}km/h（巡航 ${(CAR_SPEED * 3.6 / S).toFixed(0)}）` +
+      `  重投 ${(state.carResp || 0) - resp0} 次 ` +
+      Object.keys(state.rs).map(k => k + ':' + state.rs[k]).join(' ');
+    renderer.render(scene, camera);
+    return;
+  }
+
   if (DEBUG) { loop(); return; }
   const gate = $('start');
   gate.classList.add('on');
@@ -2482,7 +2578,7 @@ function goFullscreen() {
   const el = document.documentElement;
   const fn = el.requestFullscreen || el.webkitRequestFullscreen;
   if (fn && !document.fullscreenElement) fn.call(el).catch(() => {});
-  if (screen.orientation && screen.orientation.lock) screen.orientation.lock('portrait').catch(() => {});
+  if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {});
 }
 
 boot().catch(e => {
