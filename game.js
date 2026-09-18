@@ -2176,13 +2176,27 @@ function updateMarkers(dt, time) {
 
 /* ---------- 主循环 ---------- */
 const clock = new THREE.Clock();
+/* 舞台高度自己算，不靠 100dvh。安卓 Chrome 横屏里 dvh 比真正能看见的那块高
+   （地址栏、手势条各算一次），舞台一超出去，底下那排摇杆、油门、刹车就掉到
+   屏幕外面点不到了。宽度交给 CSS 的 100vw，只压高度这一轴。
+   每帧对一次：地址栏收起是个动画，只听 resize 会停在中间那个尺寸。 */
+const stage = $('stage');
+let stageH = 0;
+function fitStage() {
+  const vv = window.visualViewport;
+  const h = Math.round(Math.min(innerHeight || 1e9, vv ? vv.height : 1e9));
+  if (h > 0 && h !== stageH) { stageH = h; stage.style.height = h + 'px'; return true; }
+  return false;
+}
 function resize() {
+  fitStage();
   const w = canvas.clientWidth || innerWidth, h = canvas.clientHeight || innerHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
 addEventListener('resize', resize);
+if (window.visualViewport) visualViewport.addEventListener('resize', resize);
 
 /* DEBUG 用：真正会被提交绘制的网格数，以及它们一共有多少个材质分组
    （一个 mesh 挂 N 个材质就是 N 次 draw call） */
@@ -2202,6 +2216,7 @@ function countDrawn(o, acc) {
 const _lpU = new THREE.Vector3(), _lpN = new THREE.Vector3(), _lpE = new THREE.Vector3();
 function loop() {
   requestAnimationFrame(loop);
+  if (fitStage()) resize();
   const dt = Math.min(clock.getDelta(), 0.05);
   const time = clock.elapsedTime;
   if (state.onBike) updatePlayer(dt);
@@ -2578,7 +2593,8 @@ function goFullscreen() {
   const el = document.documentElement;
   const fn = el.requestFullscreen || el.webkitRequestFullscreen;
   if (fn && !document.fullscreenElement) fn.call(el).catch(() => {});
-  if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {});
+  /* 不锁方向：横竖两套 HUD 都在，玩家转手机就跟着转。
+     锁过 landscape 的话竖着拿会被系统硬转回来，反而更别扭。 */
 }
 
 boot().catch(e => {
