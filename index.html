@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<meta name="theme-color" content="#8fd0f5">
+<meta name="theme-color" content="#e8dfcc">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -12,7 +12,7 @@
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icon.svg">
 <link rel="icon" href="./icon.svg">
-<title>小邮差 · 3D Demo</title>
+<title>小邮差 · 晴日来信</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
 html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavior:none; touch-action:none;
@@ -221,6 +221,7 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
   .brake.img { width:50px; height:50px; right:88px; bottom:28px; }
 }
 </style>
+<link rel="stylesheet" href="./postcard.css?v=20260928">
 <script type="importmap">
 { "imports": {
   "three": "./vendor/three.module.js",
@@ -233,6 +234,7 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
 <body>
 <div id="stage">
   <canvas id="gl"></canvas>
+  <div class="film-edge" aria-hidden="true"></div>
   <div class="hud">
     <div class="topbar">
       <div class="avatar">
@@ -243,14 +245,14 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
         <img src="./assets/ui/avatar.png" alt="" onload="this.parentNode.classList.add('img')" onerror="this.remove()">
       </div>
       <div>
-        <div class="pname">小邮差星球</div>
+        <div class="pname">小邮差<span class="edition">晴日来信</span></div>
         <div class="lvrow"><div class="lvbadge" id="lvNum">1</div><div class="lvbar"><i id="lvFill"></i></div></div>
         <div class="lvtxt" id="lvTxt">0/100</div>
       </div>
       <div class="spacer"></div>
       <div class="res"><div class="ic gold">¥</div><b id="coin">0</b><i class="plus">+</i></div>
       <div class="res"><div class="ic pack">信</div><b id="parcel">0</b><i class="plus">+</i></div>
-      <div class="gear" id="btnGear">⚙</div>
+      <button class="gear" id="btnGear" aria-label="操作提示">☰</button>
     </div>
 
     <div class="taskbar"><div class="taskicon" id="taskIcon">📮</div>
@@ -273,12 +275,17 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
          onload="this.parentNode.classList.add('img')" onerror="this.remove()"></div>
 
     <div class="bottom">
-      <div class="bbtn" data-panel="bag"><em>🎒</em><span>背包</span><img src="./assets/ui/btn-bag.png" alt=""
+      <div class="bbtn" data-panel="bag" role="button" tabindex="0" aria-label="背包"><em>♧</em><span>背包</span><img src="./assets/ui/btn-bag.png" alt=""
            onload="this.parentNode.classList.add('img')" onerror="this.remove()"></div>
-      <div class="bbtn" data-panel="task"><em>📒</em><span>任务笔记</span><img src="./assets/ui/btn-note.png" alt=""
+      <div class="bbtn" data-panel="task" role="button" tabindex="0" aria-label="任务笔记"><em>▤</em><span>任务笔记</span><img src="./assets/ui/btn-note.png" alt=""
            onload="this.parentNode.classList.add('img')" onerror="this.remove()"></div>
-      <div class="bbtn" data-panel="shop"><em>🛒</em><span>商店</span><img src="./assets/ui/btn-shop.png" alt=""
+      <div class="bbtn" data-panel="shop" role="button" tabindex="0" aria-label="商店"><em>⌂</em><span>商店</span><img src="./assets/ui/btn-shop.png" alt=""
            onload="this.parentNode.classList.add('img')" onerror="this.remove()"></div>
+    </div>
+    <div class="view-controls" aria-label="风景设置">
+      <button id="btnLight" aria-pressed="false">☀ 晴日</button>
+      <span></span>
+      <button id="btnView" aria-pressed="false">◎ 星球远眺</button>
     </div>
 
     <div class="toast" id="toast"></div>
@@ -288,12 +295,16 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
         <div class="close" id="pClose">关闭</div></div>
     </div>
   </div>
+  <button id="btnQuiet" aria-pressed="false">收起界面</button>
       <div id="loading">加载星球城市…<div class="bar"><i id="ldFill"></i></div><div class="tip" id="ldTip"></div><div class="err" id="ldErr"></div><button id="ldRetry">重 试</button></div>
   <div id="start">
-    <h1>小 邮 差</h1>
-    <p>骑上电动车绕着星球小城送信<br>去红色邮箱取信，再送到绿色光柱</p>
-    <button id="btnStart">开 始 送 信</button>
-    <p style="font-size:11px;opacity:.75">横屏竖屏都能玩 · 支持全屏 · 可添加到主屏幕</p>
+    <div class="postmark" aria-hidden="true">晴日<br><span>POST / 01</span></div>
+    <div class="eyebrow">LETTERS FROM A LITTLE PLANET</div>
+    <h1>小邮差<span>晴日来信</span></h1>
+    <p class="intro-copy">风经过树梢，信会抵达。<br>骑上小车，去小小的星球上走一走。</p>
+    <button id="btnStart">开始送信 <span>↗</span></button>
+    <p class="intro-help">红色邮箱取信 · 绿色光柱送达<br>WASD 骑行 · F 上下车 · V 远眺星球</p>
+    <span class="intro-footnote">慢一点，也没关系。</span>
   </div>
 </div>
 <script>
@@ -307,6 +318,6 @@ html,body { height:100%; background:#0f1418; overflow:hidden; overscroll-behavio
   if (location.protocol === 'file:') show('请用本地服务器打开：\n在 postman-3d 目录运行 serve.ps1，\n然后访问 http://localhost:8130/');
 })();
 </script>
-<script type="module" src="./game.js"></script>
+<script type="module" src="./game.js?v=20260928"></script>
 </body>
 </html>

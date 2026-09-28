@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
+import { createAtmosphere, createDriftingSeeds } from './atmosphere.js?v=20260928';
 
 /* ?pc / ?mob 强制切换手机/桌面档：headless 截图和手机档的画质差别很大
    （比如手机档城市不投影），排查画面问题时必须能指定跑哪一档。 */
@@ -41,7 +42,7 @@ const CFG = {
   /* 雾要淡、要远：近端往外推，远处的楼才不会一上来就被刷白。
      但远端必须压在 VIEW_ARC 之内（雾把剔除那一下跳变盖住），
      所以放雾必须连着放 VIEW_ARC，两个值一起改。 */
-  fog: IS_MOBILE ? [230, 430] : [320, 560],
+  fog: IS_MOBILE ? [180, 440] : [240, 570],
   maxDpr: IS_MOBILE ? 1.6 : 2
 };
 
@@ -66,42 +67,14 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, CFG.maxDpr));
 renderer.shadowMap.enabled = !/(\?|&)noshadow/.test(location.search);
 renderer.shadowMap.type = IS_MOBILE ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0xd9e9f9, CFG.fog[0], CFG.fog[1]);   // 雾色对着天空图地平线那条云海
+scene.fog = new THREE.Fog(0xd9d5bf, CFG.fog[0], CFG.fog[1]);
 
-const camera = new THREE.PerspectiveCamera(52, 1, 0.15 * S, IS_MOBILE ? 600 : 900);
+const camera = new THREE.PerspectiveCamera(48, 1, 0.15 * S, 1800);
 camera.position.set(0, 6, -10);
-
-/* 天空球：一张 2:1 全景图直接当等距柱面贴图铺在球内壁上。
-   贴图是异步加载的，所以先给个和图里天顶差不多的蓝当兜底色，
-   加载完再挂上 map —— 万一图挂了，天还是蓝的，不会变成一片黑。
-   每帧还会把球对齐到玩家脚下的「上」方向（见 loop 里的 sky.quaternion），
-   这样不管跑到星球哪一面，云海都压在地平线上。 */
-const skyMat = new THREE.MeshBasicMaterial({
-  color: 0x6fb2e8, side: THREE.BackSide, depthWrite: false, fog: false
-});
-const sky = new THREE.Mesh(new THREE.SphereGeometry(560, 48, 32), skyMat);
-sky.frustumCulled = false;
-scene.add(sky);
-
-async function loadSky() {
-  const t = await loadTex('./assets/sky-day.png');
-  /* 从球内侧看，等距柱面贴图左右是镜像的，翻回来 */
-  t.wrapS = THREE.RepeatWrapping;
-  t.repeat.x = -1; t.offset.x = 1;
-  /* 纵向要压一压。原图是「站在云海之上」的全景：蓝天占上面 35%，云海在中间。
-     直接铺开的话地平线正好落在云海下沿，而 52° 视角从地面往前看只覆盖 ±25°，
-     满屏都是那片浅白云海，蓝天全在头顶看不见的地方。
-     这里把 uv.y 线性拉伸（uv.y 是 1=天顶 / 0.5=地平线 / 0=天底）：
-     云海压到地平线上方 4°，抬头 50° 就到图顶那层最蓝，超出范围靠 ClampToEdge 补边。 */
-  t.wrapT = THREE.ClampToEdgeWrapping;
-  t.repeat.y = 1.76; t.offset.y = -0.37;
-  t.anisotropy = IS_MOBILE ? 2 : 4;
-  skyMat.color.setHex(0xffffff);
-  skyMat.map = t;
-  skyMat.needsUpdate = true;
-}
 
 function cloudTexture() {
   const cv = document.createElement('canvas');
@@ -126,8 +99,8 @@ function cloudTexture() {
 const cloudTex = cloudTexture();
 /* 云的位置每帧在玩家脚下的切平面里重算，这里只存「东/北向偏移 + 高度」 */
 const clouds = [];
-for (let i = 0; i < (IS_MOBILE ? 12 : 20); i++) {
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.9, fog: false, depthWrite: false }));
+for (let i = 0; i < (IS_MOBILE ? 4 : 7); i++) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, color: 0xe7dfcd, transparent: true, opacity: 0.16, fog: false, depthWrite: false }));
   const s = (70 + Math.random() * 90) * S;
   sp.scale.set(s, s * 0.46, 1);
   scene.add(sp);
@@ -138,50 +111,47 @@ for (let i = 0; i < (IS_MOBILE ? 12 : 20); i++) {
   });
 }
 
-scene.add(new THREE.HemisphereLight(0xcce6f8, 0xb4b79c, 0.46));
-scene.add(new THREE.AmbientLight(0xffffff, 0.26));
+const hemisphere = new THREE.HemisphereLight(0xb9c9c5, 0x969b7d, 1.35);
+const ambient = new THREE.AmbientLight(0xe4dfcc, 0.55);
+scene.add(hemisphere, ambient);
 const sun = new THREE.DirectionalLight(0xfff8e6, 1.3);
 sun.position.set(46 * S, 86 * S, 38 * S);
 sun.castShadow = true;
 sun.shadow.mapSize.set(CFG.shadowSize, CFG.shadowSize);
 sun.shadow.bias = -0.0006;
 /* 阴影范围乘了 S，一个阴影像素覆盖的世界尺寸也跟着大 S 倍，偏移量必须一起放大 */
-sun.shadow.normalBias = 0.04 * S;
+sun.shadow.normalBias = 0.075 * S;
 sun.shadow.radius = IS_MOBILE ? 1 : 2;
 const sc = sun.shadow.camera;
 sc.left = -CFG.shadowSpan; sc.right = CFG.shadowSpan;
 sc.top = CFG.shadowSpan; sc.bottom = -CFG.shadowSpan;
 sc.near = 1; sc.far = 240 * S;
 scene.add(sun, sun.target);
+const atmosphere = createAtmosphere(scene, renderer, sun, hemisphere, ambient);
+const updateSeeds = createDriftingSeeds(scene, IS_MOBILE ? 20 : 42);
+let scenicView = new URLSearchParams(location.search).has('scenic');
+let evening = false;
+let introPreview = !DEBUG && !/(?:\?|&)(?:selftest|cartest|footest)(?:&|$)/.test(location.search);
 
-/* ---------- toon shading ---------- */
-/* 赛璐璐：硬边分色带，NearestFilter 保证明暗交界是一条锐利的线而不是渐变 */
-function toonGradient(stops) {
-  const n = stops.length;
-  const d = new Uint8Array(n);
-  for (let i = 0; i < n; i++) d[i] = Math.round(255 * stops[i]);
-  const t = new THREE.DataTexture(d, n, 1, THREE.RedFormat);
-  t.minFilter = t.magFilter = THREE.NearestFilter;
-  t.needsUpdate = true;
-  return t;
-}
-const GRAD = toonGradient([0.70, 0.86, 1.0]);
-
-/* 动画赛璐璐调色：提饱和 + 轻微加对比，暗部往冷蓝偏（动画里阴影都是带色的） */
-const WASH = { sat: 1.24, contrast: 1.06, coolShadow: 0.10 };
+/* Matte postcard palette; preserve the source model's faceted normals. */
+const WASH = { sat: 0.78, contrast: 0.94, coolShadow: 0.04 };
 function pastel(m) {
   const f = v => v.toFixed(4);
   m.onBeforeCompile = shader => {
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <map_fragment>',
       `#include <map_fragment>
+       float green = smoothstep(0.015, 0.12, diffuseColor.g - max(diffuseColor.r, diffuseColor.b));
+       float vegetationLight = dot(diffuseColor.rgb, vec3(0.2126,0.7152,0.0722));
+       vec3 sage = vec3(0.24, 0.32, 0.15) * (0.55 + vegetationLight * 1.6);
+       diffuseColor.rgb = mix(diffuseColor.rgb, sage, green * 0.74);
        float wg = dot(diffuseColor.rgb, vec3(0.299,0.587,0.114));
        diffuseColor.rgb = mix(vec3(wg), diffuseColor.rgb, ${f(WASH.sat)});
        diffuseColor.rgb = (diffuseColor.rgb - 0.5) * ${f(WASH.contrast)} + 0.5;
        diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.86,0.94,1.12), ${f(WASH.coolShadow)} * (1.0 - wg));
        diffuseColor.rgb = clamp(diffuseColor.rgb, 0.0, 1.0);`);
   };
-  m.customProgramCacheKey = () => 'cel';
+  m.customProgramCacheKey = () => 'postcard-matte-v1';
   return m;
 }
 
@@ -192,7 +162,11 @@ function pastel(m) {
 /* 模型里 City_Road 的底色是 #131417——亮度只有 7%，比沥青该有的灰暗得多。
    赛璐璐再往上加对比（暗部乘 0.7、(c-0.5)*1.06+0.5），整条马路就压成一片死黑，
    紧贴着饱和的绿草，看着像地上破了个洞。这里把这几个过暗的地表色抬到正常灰度。 */
-const CITY_TINT = { City_Road: 0x474c54 };
+const CITY_TINT = {
+  City_Road: 0x85877b, City_RoadLine: 0xe9dec0, City_Sidewalk: 0xb9b39a,
+  City_Curb: 0xd4cbb1, City_Grass: 0x8d9a66, City_Meadow: 0xa2ab78,
+  City_Rock: 0xa6a392,
+};
 
 const toonCache = new Map();
 function toonMat(m, opts) {
@@ -211,7 +185,7 @@ function toonMat(m, opts) {
     }
     src.needsUpdate = true;
   }
-  out = pastel(new THREE.MeshToonMaterial({
+  out = pastel(new THREE.MeshLambertMaterial({
     name: (m && m.name) || '',
     /* 有贴图的（Bld / Street / 树石草）颜色全在调色板图上，底色刷白；
        没贴图的（City_Road / City_Grass / City_Curb…）颜色只存在 material.color 里，
@@ -219,8 +193,7 @@ function toonMat(m, opts) {
     color: src ? 0xffffff
       : CITY_TINT[(m && m.name) || ''] !== undefined ? CITY_TINT[m.name]
         : (m && m.color ? m.color.getHex() : 0xffffff),
-    map: src,
-    gradientMap: GRAD
+    map: src
   }));
   toonCache.set(key, out);
   return out;
@@ -238,7 +211,7 @@ function toonify(root, opts = {}) {
 }
 
 /* ---------- 描边（反向壳 / inverted hull） ---------- */
-const OUTLINE = !/(\?|&)noline/.test(location.search);
+const OUTLINE = /(?:\?|&)outline(?:&|$)/.test(location.search);
 const OUTLINE_MUL = parseFloat((location.search.match(/[?&]lw=([\d.]+)/) || [])[1]) || 1;
 const OUTLINE_COLOR = 0x2b2622;
 const outlineMats = new Map();
@@ -316,7 +289,7 @@ function addOutline(root, world = 0.03) {
 }
 
 /* ---------- 顶点色道具（车 / 树共享一个卡通材质） ---------- */
-const VC_MAT = pastel(new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: GRAD }));
+const VC_MAT = pastel(new THREE.MeshLambertMaterial({ vertexColors: true }));
 function paint(geo, hex) {
   const c = new THREE.Color(hex), n = geo.attributes.position.count;
   const a = new Float32Array(n * 3);
@@ -778,7 +751,7 @@ function loadTex(url) {
 
 /* 反向壳只能描出剪影，窗框 / 面板缝这类「内部结构线」描不出来。
    这里对贴图本身跑一遍 Sobel，把颜色突变的地方压暗，等于把墨线直接印进贴图。 */
-const INK = !/(\?|&)noink/.test(location.search);
+const INK = /(?:\?|&)ink(?:&|$)/.test(location.search);
 function inkTexture(tex, { strength = 0.62, threshold = 0.11 } = {}) {
   if (!INK || !tex || !tex.image) return tex;
   const img = tex.image;
@@ -1329,6 +1302,8 @@ function prepareHorizon(root) {
     const ang = eyeAng + Math.acos(clamp(PLANET.R / (PLANET.R + H), -1, 1)) + 0.03;
     horizon.push({
       o, d: _hzC.clone().normalize(),
+      castsShadow: o.castShadow && !/^Grass/i.test(o.name),
+      topAngle: Math.acos(clamp(PLANET.R / (PLANET.R + H), -1, 1)),
       lim: Math.cos(Math.min(ang, maxAng)),
       shell: o.children.find(c => c.userData.__outline) || null,
       limS: Math.cos(Math.min(ang, ARC_LINE / PLANET.R))
@@ -1336,14 +1311,21 @@ function prepareHorizon(root) {
   });
 }
 
-const _hzU = new THREE.Vector3();
+const _hzU = new THREE.Vector3(), _hzFocus = new THREE.Vector3();
 function horizonCull(q) {
-  fUp(q, _hzU);
+  fUp(q, _hzFocus);
+  const shadowLimit = Math.cos((CFG.shadowSpan * 1.45) / PLANET.R);
+  _hzU.copy(camera.position).sub(PLANET.C);
+  const eyeHeight = Math.max(EYE, _hzU.length() - PLANET.R);
+  _hzU.normalize();
+  const eyeAngle = Math.acos(PLANET.R / (PLANET.R + eyeHeight));
+  const maxAngle = (scenicView || introPreview ? 1350 : VIEW_ARC) / PLANET.R;
   let on = 0;
   for (const e of horizon) {
     const dot = e.d.dot(_hzU);
-    const v = dot >= e.lim;
+    const v = dot >= Math.cos(Math.min(eyeAngle + e.topAngle + 0.05, maxAngle));
     e.o.visible = v;
+    e.o.castShadow = e.castsShadow && e.d.dot(_hzFocus) > shadowLimit;
     if (e.shell) e.shell.visible = v && dot >= e.limS;
     if (v) on++;
   }
@@ -1449,8 +1431,13 @@ function findRoadFrame(minOpen = 3 * S, near = null, maxDist = 0, pave = false) 
 /* 出生点：找一块空旷、且至少有一个方向能连着开 22 个车身长的地方 */
 function pickSpawn() {
   let best = null;
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 100; i++) {
     const q = findRoadFrame(3 * S);
+    const up = fUp(q, new THREE.Vector3());
+    // The sampler can fall back to the north pole. Never accept that fallback
+    // unless it really is a drivable, correctly baked piece of ground.
+    if (!driveAt(q, CFG.bikeRadius) || blockedDir(up)
+        || groundR(up) < PLANET.R - 4 || groundR(up) > PLANET.R + FLAT) continue;
     const r = openRadius(q, 7 * S);
     if (r < 3 * S) continue;
     for (let k = 0; k < 4; k++) {
@@ -1463,7 +1450,14 @@ function pickSpawn() {
     }
     if (best && best.score > 90 * S) break;
   }
-  return best ? best.q : findRoadFrame(S);
+  if (best) return best.q;
+  for (let i = 0; i < 30; i++) {
+    const q = findRoadFrame(S);
+    const up = fUp(q, new THREE.Vector3());
+    if (driveAt(q, CFG.bikeRadius) && !blockedDir(up)
+        && groundR(up) >= PLANET.R - 4 && groundR(up) <= PLANET.R + FLAT) return q;
+  }
+  throw new Error('没有找到安全的道路出生点，请重试');
 }
 
 /* ---------- 邮箱 / 标记 ---------- */
@@ -1806,8 +1800,40 @@ document.querySelectorAll('.bbtn').forEach(b => b.addEventListener('click', () =
   $('pList').innerHTML = cells.map(([e, t]) => `<div class="cell"><em>${e}</em>${t}</div>`).join('');
   $('mask').classList.add('on');
 }));
+document.querySelectorAll('.bbtn').forEach(b => b.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); b.click(); }
+}));
 $('pClose').onclick = () => $('mask').classList.remove('on');
 $('btnGear').onclick = () => toast('Demo 版本 · 送信赚金币升级');
+function toggleView() {
+  scenicView = !scenicView;
+  $('btnView').setAttribute('aria-pressed', String(scenicView));
+  $('btnView').textContent = scenicView ? '↙ 返回骑行' : '◎ 星球远眺';
+}
+function toggleLight() {
+  evening = !evening;
+  atmosphere.setTheme(evening ? 'evening' : 'day');
+  $('btnLight').setAttribute('aria-pressed', String(evening));
+  $('btnLight').textContent = evening ? '☾ 黄昏' : '☀ 晴日';
+  document.documentElement.dataset.light = evening ? 'evening' : 'day';
+}
+$('btnView').onclick = toggleView;
+$('btnLight').onclick = toggleLight;
+$('btnGear').onclick = () => toast('V 切换远眺 · H 收起界面 · 晴日 / 黄昏可切换');
+$('btnQuiet').onclick = () => {
+  const quiet = document.body.classList.toggle('quiet');
+  $('btnQuiet').textContent = quiet ? '显示界面' : '收起界面';
+  $('btnQuiet').setAttribute('aria-pressed', String(quiet));
+};
+addEventListener('keydown', e => {
+  if (e.repeat || introPreview) return;
+  if (e.code === 'KeyV') toggleView();
+  if (e.code === 'KeyH') $('btnQuiet').click();
+});
+if (scenicView) {
+  $('btnView').setAttribute('aria-pressed', 'true');
+  $('btnView').textContent = '↙ 返回骑行';
+}
 document.querySelector('.taskbar').addEventListener('click', () =>
   document.querySelector('.bbtn[data-panel="task"]').click());
 document.querySelectorAll('.res .plus').forEach(p => p.addEventListener('click', e => {
@@ -2148,9 +2174,19 @@ function updateCamera(dt) {
 
   /* 镜头的距离和高度也按 S 放大，屏幕上人还是那么大，但楼变小了——
      这正是「人和车太小」要的效果。速度项不用乘 S，速度本身已经乘过了。 */
-  const base = state.onBike ? 9.6 * S + Math.abs(state.speed) * 0.18 : 5.6 * S + foot.speed * 0.2;
+  const wide = scenicView || introPreview;
+  scene.fog.near += ((wide ? 620 : CFG.fog[0]) - scene.fog.near) * Math.min(1, dt * 3);
+  scene.fog.far += ((wide ? 1450 : CFG.fog[1]) - scene.fog.far) * Math.min(1, dt * 3);
+  if (wide) {
+    camGoal.copy(p).addScaledVector(_cDir, -95 * S).addScaledVector(_cUp, 145 * S);
+    lookGoal.copy(p).addScaledVector(_cDir, 32 * S).addScaledVector(_cUp, -25 * S);
+    camera.position.lerp(camGoal, Math.min(1, dt * 2.4));
+    camera.lookAt(lookGoal);
+    return;
+  }
+  const base = state.onBike ? 12.6 * S + Math.abs(state.speed) * 0.16 : 7.2 * S + foot.speed * 0.2;
   const back = cameraDistance(base);
-  const high = (state.onBike ? 2.6 : 1.9) * S;
+  const high = (state.onBike ? 5.6 : 3.0) * S;
   camGoal.copy(p).addScaledVector(_cDir, -back).addScaledVector(_cUp, high + back * 0.22);
   lookGoal.copy(p).addScaledVector(_cDir, 4.2 * S).addScaledVector(_cUp, (state.onBike ? 1.3 : 1.1) * S);
   camera.position.lerp(camGoal, Math.min(1, dt * (state.onBike ? 6 : 7)));
@@ -2219,12 +2255,14 @@ function loop() {
   if (fitStage()) resize();
   const dt = Math.min(clock.getDelta(), 0.05);
   const time = clock.elapsedTime;
-  if (state.onBike) updatePlayer(dt);
-  else updateFoot(dt);
+  if (!introPreview) {
+    if (state.onBike) updatePlayer(dt);
+    else updateFoot(dt);
+  }
   if (boy.mixer) boy.mixer.update(dt);
   updateTraffic(dt);
   updateCamera(dt);
-  updateMarkers(dt, time);
+  if (!introPreview) updateMarkers(dt, time);
 
   const fp = focusPos();
   fUp(focusFrame(), _lpU);
@@ -2234,10 +2272,8 @@ function loop() {
   _lpN.normalize();
   _lpE.crossVectors(_lpN, _lpU).normalize();
 
-  sun.position.copy(fp).addScaledVector(_lpU, 86 * S).addScaledVector(_lpE, 46 * S).addScaledVector(_lpN, 38 * S);
-  sun.target.position.copy(fp);
-  sky.position.copy(camera.position);
-  sky.quaternion.setFromUnitVectors(YAXIS, _lpU);
+  atmosphere.update(camera, fp, _lpU, _lpE, _lpN);
+  updateSeeds(time, fp, _lpU, _lpE, _lpN);
   for (const c of clouds) {
     c.u += c.spd * dt;
     if (c.u > 300) c.u -= 600;
@@ -2292,7 +2328,7 @@ async function boot() {
   }
   setProgress(0.03, '加载星球城市…');
   /* 天空贴图和城市并行下（1.4MB，不占进度条），失败也不拦着开局 */
-  const skyReady = loadSky().catch(e => console.warn('天空贴图加载失败', e));
+
   /* 贴图不用手动指定：FBXLoader 会把模型里的贴图引用去掉 Windows 路径，
      然后到 ./assets/ 下找 Textures.png 和 texture_gradient.png */
   const city = await loadOne('./assets/planet-city.fbx', f => setProgress(0.03 + f * 0.40));
@@ -2331,7 +2367,7 @@ async function boot() {
         m.map = null; m.color.setHex(DC[m.name]); m.needsUpdate = true;
       }
     });
-    sky.visible = false;
+    atmosphere.sky.visible = false;
     scene.background = new THREE.Color(0xff00ff);
   }
   scene.add(city);
@@ -2347,7 +2383,7 @@ async function boot() {
   buildMiniImage();
   await new Promise(r => setTimeout(r, 16));
 
-  setProgress(0.66, '勾描边线…');
+  setProgress(0.66, '铺开街道与树影…');
   /* 地表本身不能描边：反向壳会变成一个套住整个星球的黑球。
      945 丛地被草也跳过——它们只有巴掌大，描边看不出来，却要多一倍提交。 */
   const inked = [];
@@ -2421,6 +2457,7 @@ async function boot() {
 
   setProgress(0.93, '投放邮箱…');
   state.q.copy(pickSpawn());
+  atmosphere.orientSun(state.q);
   state.gr = undefined;
   syncBody(player, state.q, 0, state, 1);
   updateCamera(1);                      // dt=1 让镜头一次就位，不然开局会从远处飞过来
@@ -2446,7 +2483,7 @@ async function boot() {
 
   setProgress(0.96, '布置车流与街景…');
   placeParked(IS_MOBILE ? 9 : 14);
-  await skyReady;
+
   await new Promise(r => setTimeout(r, 16));
 
   initTraffic(IS_MOBILE ? 7 : 11);
@@ -2580,12 +2617,14 @@ async function boot() {
   if (DEBUG) { loop(); return; }
   const gate = $('start');
   gate.classList.add('on');
+  document.body.classList.add('welcome');
+  loop();
   $('btnStart').addEventListener('click', () => {
     gate.classList.remove('on');
-    goFullscreen();
+    document.body.classList.remove('welcome');
+    introPreview = false;
     resize();
     clock.getDelta();
-    loop();
   }, { once: true });
 }
 
