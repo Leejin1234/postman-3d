@@ -107,10 +107,21 @@ export function conformRoadMarkings(root, center, clearance = 0.012) {
             return v.p.clone().multiplyScalar(scale).addScaledVector(road.normal, clearance).add(center);
           });
           localNormal.copy(road.normal).applyMatrix3(normalToLocal).normalize();
+          // Test winding in the same local Float32 coordinates sent to the GPU.
+          // Source markings contain both windings; DoubleSide flips lighting
+          // normals on back faces, so outward normals alone create dark patches.
+          const localProjected = projected.map(p => {
+            const local = p.clone().applyMatrix4(inverse);
+            return local.set(Math.fround(local.x), Math.fround(local.y), Math.fround(local.z));
+          });
           for (let k = 1; k < poly.length - 1; k++) {
             const a = projected[0], b = projected[k], c = projected[k + 1];
             if (vertex.copy(b).sub(a).cross(localPoint.copy(c).sub(a)).lengthSq() < 1e-12) continue;
-            for (const j of [0, k, k + 1]) emit(indices, poly[j].weights, localPoint.copy(projected[j]).applyMatrix4(inverse), localNormal);
+            vertex.copy(localProjected[k]).sub(localProjected[0])
+              .cross(localPoint.copy(localProjected[k + 1]).sub(localProjected[0]));
+            if (vertex.lengthSq() < 1e-18) continue;
+            const order = vertex.dot(localNormal) < 0 ? [0, k + 1, k] : [0, k, k + 1];
+            for (const j of order) emit(indices, poly[j].weights, localProjected[j], localNormal);
             stats.triangles++;
             emitted = true;
           }
