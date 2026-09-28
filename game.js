@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { createAtmosphere, createDriftingSeeds } from './atmosphere.js?v=20260928';
+import { conformRoadMarkings } from './road-markings.js?v=20260928-2';
 
 /* ?pc / ?mob 强制切换手机/桌面档：headless 截图和手机档的画质差别很大
    （比如手机档城市不投影），排查画面问题时必须能指定跑哪一档。 */
@@ -2375,6 +2376,8 @@ async function boot() {
 
   setProgress(0.52, '测量星球…');
   fitPlanet(city);
+  const roadMarkings = conformRoadMarkings(city, PLANET.C);
+  if (DEBUG) console.info('Road markings conformed:', roadMarkings);
   bakeGround(city);
   await new Promise(r => setTimeout(r, 16));
 
