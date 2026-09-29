@@ -29,8 +29,8 @@ export function scatterMeadow(planet, allowed = () => true) {
       if (random() > .45 + .55 * patch || lakeMetric(p) < 1.13) continue;
       up.copy(p).normalize();
       if (!allowed(p, up)) continue;
-      // Keep the existing flower coverage while adding many more separate blades.
-      const flower = random() < .025 + .067 * smooth(.55, .88, patch);
+      // Half the flower density; consume the same random values to preserve grass placement.
+      const flower = random() < .0125 + .0335 * smooth(.55, .88, patch);
       const k = key(Math.floor(p.x / CELL), Math.floor(p.y / CELL), Math.floor(p.z / CELL));
       if (!bins.has(k)) bins.set(k, []);
       bins.get(k).push(p.x, p.y, p.z, random(), flower ? 1 : 0);
@@ -96,7 +96,7 @@ export function createMeadowPlants(scene, field, { mobile = false } = {}) {
   }
   const last = new T.Vector3(Infinity, 0, 0), p = new T.Vector3(), up = new T.Vector3(), scale = new T.Vector3();
   const q = new T.Quaternion(), yaw = new T.Quaternion(), axis = new T.Vector3(0, 1, 0), matrix = new T.Matrix4();
-  const colors = ['#fff4b4', '#f9ffe4', '#d8edb0', '#a6e7df', '#63cddc'].map(c => new T.Color(c));
+  const colors = ['#f3ce55', '#ead9b3'].map(c => new T.Color(c));
   function update(time, focus) {
     uniforms.meadowTime.value = time; uniforms.meadowFocus.value.copy(focus);
     if (last.distanceToSquared(focus) < 36) return;
@@ -119,7 +119,7 @@ export function createMeadowPlants(scene, field, { mobile = false } = {}) {
       grass.setMatrixAt(gi++, matrix);
       if (flower && fi < stems.instanceMatrix.count) {
         stems.setMatrixAt(fi, matrix); blooms.setMatrixAt(fi, matrix);
-        blooms.setColorAt(fi, colors[Math.min(4, Math.floor(seed * 5))]); fi++;
+        blooms.setColorAt(fi, colors[Math.min(colors.length - 1, Math.floor(seed * colors.length))]); fi++;
       }
     }
     grass.count = gi; stems.count = blooms.count = fi;
