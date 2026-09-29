@@ -8,9 +8,20 @@ import { decodeRoadGeometry, installJunctionFurniture } from '../road-geometry.j
 const { city, road } = loadCity();
 const plan = buildRoundedJunctions(road);
 assert.deepEqual([plan.stats.junctions, plan.stats.corners, plan.stats.corridors], [10, 30, 15]);
-const bytes = fs.readFileSync(new URL('../assets/roads-rounded-v2.bin', import.meta.url));
+const bytes = fs.readFileSync(new URL('../assets/roads-rounded-v3.bin', import.meta.url));
 const geometry = decodeRoadGeometry(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
 const positions = geometry.attributes.position, normals = geometry.attributes.normal;
+const oldBytes = fs.readFileSync(new URL('../assets/roads-rounded-v2.bin', import.meta.url));
+const oldGeometry = decodeRoadGeometry(oldBytes.buffer.slice(oldBytes.byteOffset, oldBytes.byteOffset + oldBytes.byteLength));
+const sidewalkGroup = geometry.groups.find(g => road.material[g.materialIndex].name === 'City_Sidewalk');
+let heightChecks = 0;
+for (let i = sidewalkGroup.start; i < sidewalkGroup.start + sidewalkGroup.count; i++) {
+  const before = new THREE.Vector3().fromBufferAttribute(oldGeometry.attributes.position, i).applyMatrix4(road.matrixWorld);
+  const after = new THREE.Vector3().fromBufferAttribute(positions, i).applyMatrix4(road.matrixWorld);
+  assert.ok(Math.abs((after.length() - 602) - (before.length() - 602) / 3) < .0002, 'Sidewalk height must be one third above asphalt');
+  assert.ok(before.normalize().distanceTo(after.normalize()) < 1e-6, 'Sidewalk footprint must not change');
+  heightChecks++;
+}
 let reversed = 0, invalid = 0, checkedFaces = 0;
 for (let i = 0; i < positions.count; i += 3) {
   const [a, b, c] = [0, 1, 2].map(k => new THREE.Vector3().fromBufferAttribute(positions, i + k));
@@ -65,12 +76,12 @@ for (const [ji, junction] of plan.junctions.entries()) for (const [si, sector] o
   // The cap must cover the new narrow edge, leaving the old broad strip paved.
   const narrow = plan.sectorPath(sector, 35.7), paved = plan.sectorPath(sector, 39);
   for (let k = 1; k < narrow.length - 1; k++) {
-    assertGround(plan.world(junction, narrow[k], 604.62), curb, 'Narrow curb continuity');
-    ray.set(origin, plan.world(junction, paved[k], 604.62).normalize());
+    assertGround(plan.world(junction, narrow[k], (602 + 2.6 / 3 + .02)), curb, 'Narrow curb continuity');
+    ray.set(origin, plan.world(junction, paved[k], (602 + 2.6 / 3 + .02)).normalize());
     assert.equal(ray.intersectObject(curb, false).length, 0, 'Old wide cap must be removed');
   }
   for (const [pi, p] of plan.sectorPath(sector, 20).entries()) { assertGround(plan.world(junction, p, 602), asphalt, `J${ji} turn ${si} sample ${pi} (${p.x},${p.y})`); roadChecks++; }
-  for (const p of plan.sectorPath(sector, 53)) { assertGround(plan.world(junction, p, 604.6), sidewalk, `J${ji} sidewalk ${si}`); walkChecks++; }
+  for (const p of plan.sectorPath(sector, 53)) { assertGround(plan.world(junction, p, (602 + 2.6 / 3)), sidewalk, `J${ji} sidewalk ${si}`); walkChecks++; }
 }
 for (const corridor of plan.corridors) for (let k = 0; k <= 20; k++) {
   const s = corridor.start + (corridor.end - corridor.start) * k / 20;
@@ -87,12 +98,19 @@ for (let i = paint.start; i < paint.start + paint.count; i += 3 * stride) {
   minGap = Math.min(minGap, gap); maxGap = Math.max(maxGap, gap);
 }
 assert.ok(minGap > 0.010 && maxGap < 0.015, `Paint clearance ${minGap}–${maxGap}`);
-const placements = JSON.parse(fs.readFileSync(new URL('../assets/junction-furniture-v1.json', import.meta.url)));
+const placements = JSON.parse(fs.readFileSync(new URL('../assets/junction-furniture-v2.json', import.meta.url)));
 installJunctionFurniture(city, placements);
+assert.equal(placements.length, 336, 'All street furniture follows the lowered sidewalk');
 for (const placement of placements) {
   const mesh = city.getObjectByName(placement.name), p = mesh.getWorldPosition(new THREE.Vector3());
   assertGround(p, sidewalk, 'Relocated ' + placement.name);
+  let bottom = Infinity;
+  const vertex = new THREE.Vector3();
+  for (let i = 0; i < mesh.geometry.attributes.position.count; i++) {
+    bottom = Math.min(bottom, vertex.fromBufferAttribute(mesh.geometry.attributes.position, i).applyMatrix4(mesh.matrixWorld).length());
+  }
+  assert.ok(Math.abs(bottom - (602 + 2.6 / 3)) < .2, 'Furniture base must follow the new sidewalk: ' + placement.name);
 }
 console.log(JSON.stringify({ junctions: 10, roundedCorners: 30, corridors: 15, checkedFaces,
   reversed, invalid, roadChecks, walkChecks, minPaintGap: minGap, maxPaintGap: maxGap,
-  relocatedFurniture: placements.length, mappedCurbTriangles, result: 'PASS' }, null, 2));
+  relocatedFurniture: placements.length, mappedCurbTriangles, heightChecks, result: 'PASS' }, null, 2));

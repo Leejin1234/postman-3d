@@ -71,7 +71,7 @@ let cases=0;
 }
 const {city,road,center}=loadCity();
 const plan=buildRoundedJunctions(road);
-installJunctionFurniture(city,JSON.parse(fs.readFileSync(new URL('../assets/junction-furniture-v1.json',import.meta.url))));
+installJunctionFurniture(city,JSON.parse(fs.readFileSync(new URL('../assets/junction-furniture-v2.json',import.meta.url))));
 createLakeside(city);
 const world=createCollisionWorld(city,center);let roadSamples=0;const blocked=[];
 for(const c of plan.corridors)for(let k=0;k<=20;k++){

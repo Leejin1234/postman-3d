@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
-const BASE = 600, ROAD = 602, WALK = 604.6;
+const BASE = 600, ROAD = 602, ORIGINAL_WALK = 604.6;
+const WALK = ROAD + (ORIGINAL_WALK - ROAD) / 3;
 const HALF = 35, OUTER = 65, CURB = 36.4;
 const TAU = Math.PI * 2;
 const v2 = (x = 0, y = 0) => new THREE.Vector2(x, y);
@@ -298,6 +299,22 @@ export function relocateJunctionFurniture(city, plan) {
     matrix.elements[12] += target.x / radius * (radius - minRadius);
     matrix.elements[13] += target.y / radius * (radius - minRadius);
     matrix.elements[14] += target.z / radius * (radius - minRadius);
+    matrix.premultiply(mesh.parent.matrixWorld.clone().invert());
+    const position = new THREE.Vector3(), quaternion = new THREE.Quaternion(), scale = new THREE.Vector3();
+    matrix.decompose(position, quaternion, scale);
+    changes.push({ name: mesh.name, position: position.toArray(), quaternion: quaternion.toArray(), scale: scale.toArray() });
+  });
+  // The FBX street props were placed on the original sidewalk. Translate their
+  // whole transforms radially; do not shrink lamp posts, benches or planters.
+  const relocated = new Set(changes.map(p => p.name));
+  city.traverse(mesh => {
+    if (!mesh.isMesh || !/^Street_/.test(mesh.name) || relocated.has(mesh.name)) return;
+    const matrix = mesh.matrixWorld.clone();
+    const up = mesh.getWorldPosition(new THREE.Vector3()).normalize();
+    const shift = WALK - ORIGINAL_WALK;
+    matrix.elements[12] += up.x * shift;
+    matrix.elements[13] += up.y * shift;
+    matrix.elements[14] += up.z * shift;
     matrix.premultiply(mesh.parent.matrixWorld.clone().invert());
     const position = new THREE.Vector3(), quaternion = new THREE.Quaternion(), scale = new THREE.Vector3();
     matrix.decompose(position, quaternion, scale);
