@@ -5,6 +5,7 @@ import { createAtmosphere, createDriftingSeeds } from './atmosphere.js?v=2026092
 import { decodeRoadGeometry, installRoadGeometry, installJunctionFurniture } from './road-geometry.js?v=20260928-4';
 import { createLakeside, isLakeWater, lakePoint } from './lakeside.js?v=20260929-2';
 import { createCollisionWorld, sweepSphere } from './collision-world.js?v=20260929-2';
+import { installSurfaceMaterials } from './surface-materials.js?v=20260929-3';
 
 /* ?pc / ?mob 强制切换手机/桌面档：headless 截图和手机档的画质差别很大
    （比如手机档城市不投影），排查画面问题时必须能指定跑哪一档。 */
@@ -2291,6 +2292,9 @@ async function boot() {
   setProgress(0.57, '铺开湖岸与木码头…');
   lakeside = createLakeside(city);
   if (DEBUG) console.info('Lakeside:', lakeside.stats);
+  setProgress(0.59, '铺设草地与街道纹理…');
+  const surfaces = await installSurfaceMaterials(city, renderer, loadTex);
+  if (DEBUG) console.info('Surface textures:', surfaces);
   bakeGround(city);
   await new Promise(r => setTimeout(r, 16));
 

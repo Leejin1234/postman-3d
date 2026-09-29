@@ -1,0 +1,63 @@
+{
+  "resolution": [
+    512,
+    512
+  ],
+  "grassSourceFiles": [
+    "草地_basecolor.png",
+    "草地_normal_OpenGL.png",
+    "草地_roughness.png"
+  ],
+  "detailChannels": "RGB: normalized OpenGL tangent normal; A: roughness (linear)",
+  "textures": [
+    {
+      "file": "asphalt-base-512.webp",
+      "size": [
+        512,
+        512
+      ],
+      "bytes": 28434
+    },
+    {
+      "file": "asphalt-detail-512.webp",
+      "size": [
+        512,
+        512
+      ],
+      "bytes": 586892
+    },
+    {
+      "file": "grass-base-512.webp",
+      "size": [
+        512,
+        512
+      ],
+      "bytes": 21976
+    },
+    {
+      "file": "grass-detail-512.webp",
+      "size": [
+        512,
+        512
+      ],
+      "bytes": 321632
+    },
+    {
+      "file": "pavers-base-512.webp",
+      "size": [
+        512,
+        512
+      ],
+      "bytes": 7972
+    },
+    {
+      "file": "pavers-detail-512.webp",
+      "size": [
+        512,
+        512
+      ],
+      "bytes": 353852
+    }
+  ],
+  "totalBytes": 1320758
+}
