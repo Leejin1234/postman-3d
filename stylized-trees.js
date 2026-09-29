@@ -3,11 +3,11 @@ import { mergeGeometries } from './vendor/utils/BufferGeometryUtils.js';
 
 const hash = name => { let h = 2166136261; for (const ch of name) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return h >>> 0; };
 
-// Original geometry, inspired by Polygon Runway's forked trunks and pointed leaf crowns.
+// Rounded overlapping foliage inspired by brainchildpl's stylized tree tutorial.
 export function buildStylizedTree(seed = 1, stride = 1) {
   const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
   const parts = [], leafPositions = [], leafNormals = [], leafColors = [];
-  const bark = new T.Color('#70402b'), barkLight = new T.Color('#9a5736');
+  const bark = new T.Color('#65554a'), barkLight = new T.Color('#877260');
   function branch(start, end, bottom, top) {
     const a = new T.Vector3(...start), b = new T.Vector3(...end), d = b.clone().sub(a);
     const geo = new T.CylinderGeometry(top, bottom, d.length(), 7, 1).toNonIndexed();
@@ -27,13 +27,13 @@ export function buildStylizedTree(seed = 1, stride = 1) {
   branch([.17, .54, -.035], [.21, .77, -.015], .017, .006);
   branch([-.045, .48, .02], [-.045, .73, .16], .021, .007);
   const crowns = [[-.17,.71,0,.23,.23,.23],[.19,.76,-.015,.24,.25,.23],[-.02,.89,.015,.24,.22,.22],[-.03,.75,.18,.22,.20,.20],[.015,.70,-.17,.24,.21,.20]];
-  const dark = new T.Color('#245936'), mid = new T.Color('#56823c'), light = new T.Color('#b5c966');
+  const dark = new T.Color('#bd7277'), mid = new T.Color('#e8908a'), light = new T.Color('#f6b2a0');
   const center = new T.Vector3(), normal = new T.Vector3(), tangent = new T.Vector3(), bitangent = new T.Vector3(), point = new T.Vector3();
   for (const [x,y,z,rx,ry,rz] of crowns) {
-    for (let i = 0; i < 92; i++) {
-      const h = random() * 2 - 1, angle = random() * Math.PI * 2, radial = Math.sqrt(1 - h * h);
+    for (let i = 0; i < 96; i++) {
+      const h = 1 - 2 * (i + .25 + random() * .5) / 96, angle = i * 2.399963 + random() * .3, radial = Math.sqrt(1 - h * h);
       normal.set(radial * Math.cos(angle), h, radial * Math.sin(angle));
-      const depth = .72 + random() * .28;
+      const depth = .88 + random() * .12;
       center.set(x + normal.x * rx * depth, y + normal.y * ry * depth, z + normal.z * rz * depth);
       tangent.set(Math.cos(angle), .25 + random() * .65, Math.sin(angle)).normalize();
       bitangent.crossVectors(normal, tangent);
@@ -41,18 +41,20 @@ export function buildStylizedTree(seed = 1, stride = 1) {
       bitangent.normalize(); tangent.crossVectors(bitangent, normal).normalize();
       tangent.applyAxisAngle(normal, random() * Math.PI * 2);
       bitangent.crossVectors(normal,tangent).normalize();
-      const length = (.062 + random() * .045) * Math.sqrt(stride), width = length * (.40 + random() * .20);
+      const length = (.069 + random() * .023) * Math.sqrt(stride), width = length * (.72 + random() * .14);
       const tint = T.MathUtils.clamp((center.y - .50) / .52 + (random() - .5) * .24, 0, 1);
       const color = tint < .5 ? dark.clone().lerp(mid, tint * 2) : mid.clone().lerp(light, (tint - .5) * 2);
       if (i % stride !== 0) continue;
-      // Folded pointed leaf: the ridge catches light without a texture or alpha overdraw.
-      const shape = [[0,-length,0],[-width,0,0],[0,length,0],[width,0,0],[0,0,.013]];
-      for (const index of [0,1,4,1,2,4,2,3,4,3,0,4]) {
+      // Broad six-sided oval; four triangles keep denser leaves within the budget.
+      const shape = [[0,-length,0],[-width,-length*.48,.005],[-width,length*.48,.005],
+        [0,length,0],[width,length*.48,.005],[width,-length*.48,.005]];
+      for (const index of [0,1,5,5,1,2,5,2,4,4,2,3]) {
         const v = shape[index]; point.copy(center).addScaledVector(tangent,v[1]).addScaledVector(bitangent,v[0]).addScaledVector(normal,v[2]);
         leafPositions.push(point.x,point.y,point.z);
         // Use crown normals for cohesive soft foliage lighting.
-        leafNormals.push(normal.x,normal.y,normal.z);
-        const shade = index === 4 ? 1.045 : 1;
+        const ny = normal.y * .6 + .4, nl = Math.hypot(normal.x,ny,normal.z);
+        leafNormals.push(normal.x/nl,ny/nl,normal.z/nl);
+        const shade = (index === 2 || index === 4) ? 1.025 : 1;
         leafColors.push(color.r * shade,color.g * shade,color.b * shade);
       }
     }

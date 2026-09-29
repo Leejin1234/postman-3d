@@ -3,14 +3,15 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { createAtmosphere, createDriftingSeeds } from './atmosphere.js?v=20260928';
 import { decodeRoadGeometry, installRoadGeometry, installJunctionFurniture } from './road-geometry.js?v=20260928-4';
-import { createLakeside, isLakeWater, lakePoint } from './lakeside.js?v=20260929-8';
+import { createLakeside, isLakeWater, lakePoint } from './lakeside.js?v=20260929-17';
 import { reduceSceneDensity } from './scene-density.js?v=20260929-9';
 import { raiseGrassLevel } from './grass-level.js?v=20260929-9';
 import { createCollisionWorld, sweepSphere } from './collision-world.js?v=20260929-15';
 import { installSurfaceMaterials } from './surface-materials.js?v=20260929-11';
 import { installSoftTerrain, smoothTerrainNormals } from './soft-terrain.js?v=20260929-11';
 import { scatterMeadow, createMeadowPlants } from './meadow-plants.js?v=20260929-14';
-import { replaceStylizedTrees } from './stylized-trees.js?v=20260929-16';
+import { replaceStylizedTrees } from './stylized-trees.js?v=20260929-17';
+import { roundSceneRocks } from './rounded-rocks.js?v=20260929-17';
 import { installFloatingStick } from './floating-stick.js?v=20260929-16';
 
 let meadowPlants = null;
@@ -2303,6 +2304,8 @@ async function boot() {
   if (DEBUG) console.info('Grass level:', grassLevel);
   const trees = replaceStylizedTrees(city, { mobile: IS_MOBILE });
   if (DEBUG) console.info('Stylized trees:', trees);
+  const rocks = roundSceneRocks(city);
+  if (DEBUG) console.info('Rounded rocks:', rocks);
   const terrainNormals = smoothTerrainNormals(city);
   if (DEBUG) console.info('Soft terrain:', terrainNormals);
   setProgress(0.59, '铺设草地与街道纹理…');

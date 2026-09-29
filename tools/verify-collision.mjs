@@ -1,5 +1,6 @@
 import { installTestTerrain } from './install-test-terrain.mjs';
 import { replaceStylizedTrees } from '../stylized-trees.js';
+import { roundSceneRocks } from '../rounded-rocks.js';
 import * as T from '../vendor/three.module.js';
 import { mergeGeometries } from '../vendor/utils/BufferGeometryUtils.js';
 import { createCollisionWorld, sweepSphere } from '../collision-world.js';
@@ -80,6 +81,7 @@ installTestTerrain(city);createLakeside(city);
 reduceSceneDensity(city);
 raiseGrassLevel(city);
 replaceStylizedTrees(city);
+roundSceneRocks(city);
 const world=createCollisionWorld(city,center);let roadSamples=0;const blocked=[];
 for(const c of plan.corridors)for(let k=0;k<=20;k++){
   const s=c.start+(c.end-c.start)*k/20;
