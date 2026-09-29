@@ -3,7 +3,8 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { createAtmosphere, createDriftingSeeds } from './atmosphere.js?v=20260928';
 import { decodeRoadGeometry, installRoadGeometry, installJunctionFurniture } from './road-geometry.js?v=20260928-4';
-import { createLakeside, isLakeWater, lakePoint } from './lakeside.js?v=20260929-1';
+import { createLakeside, isLakeWater, lakePoint } from './lakeside.js?v=20260929-2';
+import { createCollisionWorld, sweepSphere } from './collision-world.js?v=20260929-2';
 
 /* ?pc / ?mob 强制切换手机/桌面档：headless 截图和手机档的画质差别很大
    （比如手机档城市不投影），排查画面问题时必须能指定跑哪一档。 */
@@ -892,7 +893,6 @@ const YAXIS = new THREE.Vector3(0, 1, 0);
    结果它们既不参与地平线剔除、又一直全部提交绘制，白白多出 600 多次 draw call。
    草是贴地装饰，既不当地形也不挡路，直接开过去。 */
 const TERRAIN = /^(Planet|Roads)/i;
-const BLOCKING = /^(Bld|Tree|Rock|Street)/i;
 
 /* 地表半径场 + 障碍占用图，都存成等距圆柱（经纬）网格。
    ground 存浮点半径，地形是低频的，格子粗一点够用；
@@ -914,7 +914,7 @@ function groundR(dir) {
 }
 function blockedDir(dir) {
   if (isLakeWater(_lakeWorld.copy(dir).multiplyScalar(600).add(PLANET.C))) return true;
-  return GRID.occ ? GRID.occ[cellOf(dir, GRID.ow, GRID.oh)] === 1 : false;
+  return collisionWorld?.blocked(dir) || false;
 }
 /* 是不是车道（电动车、车流、出生点只认这个）。没烘出掩码时一律当成是。 */
 function driveDir(dir) {
@@ -1168,111 +1168,22 @@ function bakeGround(root) {
   if (!driveTris) GRID.surf = null;
 }
 
-/* ---------- 烘障碍占用图 ----------
-   树冠比树干宽十几倍，拿整体包围盒当碰撞会把整条街堵死。
-   这里只取物体贴地那一截的横截面当占地面积。模型哪根本地轴朝天并不确定
-   （实例被摆到球面各处，各自带着旋转），用实例矩阵把径向方向反推到本地空间来判断，
-   结果按「几何体 + 轴」缓存——3007 个实例只有 201 份网格，算一次就够。 */
-const _im3 = new THREE.Matrix3(), _lu = new THREE.Vector3(), _fp = new THREE.Vector3();
-function footBox(mesh, radial) {
-  const geo = mesh.geometry;
-  _im3.setFromMatrix4(mesh.matrixWorld).invert();
-  _lu.copy(radial).applyMatrix3(_im3);
-  const ax = Math.abs(_lu.x) > Math.abs(_lu.y)
-    ? (Math.abs(_lu.x) > Math.abs(_lu.z) ? 0 : 2)
-    : (Math.abs(_lu.y) > Math.abs(_lu.z) ? 1 : 2);
-  const sign = (ax === 0 ? _lu.x : ax === 1 ? _lu.y : _lu.z) >= 0 ? 1 : -1;
-  const key = '__foot' + ax + (sign > 0 ? 'p' : 'n');
-  if (geo.userData[key]) return geo.userData[key];
-  const p = geo.attributes.position;
-  const get = ax === 0 ? 'getX' : ax === 1 ? 'getY' : 'getZ';
-  let lo = Infinity, hi = -Infinity;
-  for (let i = 0; i < p.count; i++) {
-    const c = p[get](i) * sign;
-    if (c < lo) lo = c;
-    if (c > hi) hi = c;
-  }
-  const cut = lo + (hi - lo) * 0.3;
-  const box = new THREE.Box3();
-  for (let i = 0; i < p.count; i++) {
-    if (p[get](i) * sign > cut) continue;
-    box.expandByPoint(_fp.set(p.getX(i), p.getY(i), p.getZ(i)));
-  }
-  if (box.isEmpty()) { geo.computeBoundingBox(); box.copy(geo.boundingBox); }
-  geo.userData[key] = box;
-  return box;
-}
-
-const _c8 = [];
-for (let i = 0; i < 8; i++) _c8.push(new THREE.Vector3());
-const _su = [0, 0, 0, 0, 0, 0, 0, 0];
-function stampCells(occ, W, H, dirs) {
-  let vmin = Infinity, vmax = -Infinity;
-  for (let i = 0; i < 8; i++) {
-    const d = dirs[i];
-    _su[i] = (Math.atan2(d.x, d.z) / (Math.PI * 2) + 0.5) * W;
-    const v = Math.acos(clamp(d.y, -1, 1)) / Math.PI * H;
-    if (v < vmin) vmin = v;
-    if (v > vmax) vmax = v;
-  }
-  let umin = Infinity, umax = -Infinity;
-  for (let i = 0; i < 8; i++) { if (_su[i] < umin) umin = _su[i]; if (_su[i] > umax) umax = _su[i]; }
-  if (umax - umin > W * 0.5) {                       // 跨经线
-    umin = Infinity; umax = -Infinity;
-    for (let i = 0; i < 8; i++) {
-      const u = _su[i] < W * 0.5 ? _su[i] + W : _su[i];
-      if (u < umin) umin = u;
-      if (u > umax) umax = u;
-    }
-  }
-  let cu0 = Math.floor(umin) - 1, cu1 = Math.floor(umax) + 1;
-  if (cu1 - cu0 >= W) { cu0 = 0; cu1 = W - 1; }
-  const cv0 = Math.max(0, Math.floor(vmin) - 1), cv1 = Math.min(H - 1, Math.floor(vmax) + 1);
-  for (let cv = cv0; cv <= cv1; cv++) {
-    const row = cv * W;
-    for (let cu = cu0; cu <= cu1; cu++) {
-      let x = cu % W; if (x < 0) x += W;
-      occ[row + x] = 1;
-    }
-  }
-}
-
+/* ---------- 实体脚下轮廓碰撞 ---------- */
+let collisionWorld = null;
 function bakeOcc(root) {
-  const W = GRID.ow, H = GRID.oh;
-  const occ = GRID.occ = new Uint8Array(W * H);
-  const radial = new THREE.Vector3();
-  let n = 0;
-  root.updateMatrixWorld(true);
-  root.traverse(o => {
-    if (!o.isMesh || !o.geometry || o.userData.__outline || !BLOCKING.test(o.name)) return;
-    radial.setFromMatrixPosition(o.matrixWorld).sub(PLANET.C);
-    if (radial.lengthSq() < 1e-6) return;
-    radial.normalize();
-    const box = footBox(o, radial);
-    let i = 0;
-    for (let bx = 0; bx < 2; bx++) for (let by = 0; by < 2; by++) for (let bz = 0; bz < 2; bz++) {
-      _c8[i++].set(bx ? box.max.x : box.min.x, by ? box.max.y : box.min.y, bz ? box.max.z : box.min.z)
-        .applyMatrix4(o.matrixWorld).sub(PLANET.C).normalize();
-    }
-    stampCells(occ, W, H, _c8);
-    n++;
-  });
-  state.occObjects = n;
+  collisionWorld = createCollisionWorld(root, PLANET.C);
+  GRID.occ = collisionWorld.map(GRID.ow, GRID.oh);
+  state.occObjects = collisionWorld.stats.objects;
+  if (DEBUG) console.info('Collision footprints:', collisionWorld.stats);
 }
 
-/* 手工往占用图上盖一块（停靠车辆之类自己摆的东西） */
-const _soU = new THREE.Vector3(), _soF = new THREE.Vector3(), _soR = new THREE.Vector3();
+/* Mailboxes and parked props use round footprints, never latitude rectangles. */
+const _placedUp = new THREE.Vector3();
 function stampOcc(q, r) {
-  if (!GRID.occ) return;
-  fUp(q, _soU); fFwd(q, _soF); fRight(q, _soR);
-  let i = 0;
-  for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2) for (let c = 0; c < 2; c++) {
-    _c8[i++].copy(_soU).multiplyScalar(PLANET.R)
-      .addScaledVector(_soR, a * r).addScaledVector(_soF, b * r * (c ? 0.5 : 1)).normalize();
-  }
-  stampCells(GRID.occ, GRID.ow, GRID.oh, _c8);
+  if (!collisionWorld) return;
+  fUp(q, _placedUp);
+  collisionWorld.addDisc(_placedUp, r, 'PlacedProp', PLANET.R);
 }
-
 /* ---------- 地平线剔除 ----------
    three.js 只做视锥剔除、不做遮挡剔除：星球另一面的几千栋楼照样会进 draw call，
    只是被地表挡住看不见（实测 1100+ 次绘制）。这里按几何关系手工算一次：
@@ -1340,20 +1251,19 @@ function horizonCull(q) {
 /* ---------- 碰撞查询 ---------- */
 const _blU = new THREE.Vector3(), _blF = new THREE.Vector3(), _blR = new THREE.Vector3(), _blT = new THREE.Vector3();
 function blockedAt(q, r = CFG.bikeRadius) {
-  if (!GRID.occ) return false;
   fUp(q, _blU);
-  if (blockedDir(_blU)) return true;
+  if (collisionWorld?.blocked(_blU, r)) return true;
+  if (isLakeWater(_lakeWorld.copy(_blU).multiplyScalar(600).add(PLANET.C))) return true;
   fFwd(q, _blF); fRight(q, _blR);
-  for (let i = 0; i < 4; i++) {
-    _blT.copy(_blU).multiplyScalar(PLANET.R)
-      .addScaledVector(_blR, i === 0 ? r : i === 1 ? -r : 0)
-      .addScaledVector(_blF, i === 2 ? r : i === 3 ? -r : 0)
-      .normalize();
-    if (blockedDir(_blT)) return true;
+  for (let i = 0; i < 8; i++) {
+    const a = i * Math.PI / 4;
+    _blT.copy(_blU).multiplyScalar(600)
+      .addScaledVector(_blR, Math.cos(a) * r)
+      .addScaledVector(_blF, Math.sin(a) * r).normalize();
+    if (isLakeWater(_lakeWorld.copy(_blT).multiplyScalar(600).add(PLANET.C))) return true;
   }
   return false;
 }
-
 /* 从 frame 出发，正前方 dist 米内是否通畅 */
 const _dcQ = new THREE.Quaternion();
 function dirClear(q, dist, r = 1.05 * S) {
@@ -1966,22 +1876,8 @@ function syncBody(obj, q, h, ent, k) {
 
 /* 撞墙时沿墙滑行：朝斜前方试着挪一点，但朝向不变。返回是否畅通 */
 function slide(q, out, step, r) {
-  out.copy(q);
-  if (!step) return true;
-  advance(out, step);
-  if (!blockedAt(out, r)) return true;
-  for (let i = 0; i < 4; i++) {
-    const a = (i < 2 ? 0.55 : 1.0) * (i % 2 ? -1 : 1);
-    out.copy(q);
-    turn(out, a);
-    advance(out, step * 0.8);
-    turn(out, -a);
-    if (!blockedAt(out, r)) return false;
-  }
-  out.copy(q);
-  return false;
+  return sweepSphere(q, out, step, r, PLANET.R, blockedAt);
 }
-
 /* ?auto 时自动朝任务点打方向，用来无人值守跑一遍「取信 -> 送达」全流程 */
 const _asU = new THREE.Vector3(), _asF = new THREE.Vector3();
 const _asD = new THREE.Vector3(), _asC = new THREE.Vector3();

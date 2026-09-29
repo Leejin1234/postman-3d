@@ -17,7 +17,7 @@ function metric(x,z){return Math.hypot(x/RX,z/RZ)/boundary(Math.atan2(z/RZ,x/RX)
 function polar(a,s){return [RX*Math.cos(a)*boundary(a)*s,RZ*Math.sin(a)*boundary(a)*s];}
 function bedRadius(q,original){const inner=592+7.4*smooth(.65,1,q);const rim=599.4+2.3*smooth(1,1.13,q);return q<1?inner:T.MathUtils.lerp(rim,original,smooth(1.13,1.45,q));}
 export function lakeMetric(point){const p=coords(point);return metric(p.x,p.y);}
-export function isLakeWater(point){const d=point.dot(LAKE_UP);if(d<point.length()*.93)return false;const x=600*point.dot(X)/d,z=600*point.dot(Z)/d;return metric(x,z)<1.025&&!onDock(x,z);}
+export function isLakeWater(point){const d=point.dot(LAKE_UP);if(d<point.length()*.93)return false;const x=600*point.dot(X)/d,z=600*point.dot(Z)/d;return metric(x,z)<1&&!onDock(x,z);}
 function onDock(x,z){return (Math.abs(x-28)<4.4&&z>38.5&&z<100)||(Math.abs(x-28)<11.5&&z>36.5&&z<43.5);}
 
 export function createLakeside(city){
@@ -85,7 +85,3 @@ export function createLakeside(city){
   city.updateMatrixWorld(true);
   return {root,stats:{terrainVerticesChanged:changed,vegetationRemoved:remove.length,vegetationAdjusted:reposition.length,boats:boats.length},update(t){time.value=t;for(const b of boats){b.group.position.copy(b.p).addScaledVector(b.up,.18*Math.sin(t*1.1+b.phase));b.group.quaternion.copy(b.base).multiply(new T.Quaternion().setFromEuler(new T.Euler(.015*Math.sin(t+b.phase),0,.025*Math.sin(t*.8+b.phase))));}},waterContains:isLakeWater};
 }
-
-
-
-
