@@ -57,7 +57,7 @@ function surfaceMaterial(name, base, detail, { color, period, strength, grass = 
 }
 
 export async function installSurfaceMaterials(city, renderer, loadTexture) {
-  const kinds = ['grass', 'asphalt', 'pavers'];
+  const kinds = ['grass-v2', 'asphalt', 'pavers'];
   const textures = await Promise.all(kinds.map(async kind => {
     const [base, detail] = await Promise.all(['base', 'detail'].map(channel =>
       loadTexture(`./assets/surfaces/${kind}-${channel}-512.webp`)));

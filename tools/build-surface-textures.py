@@ -5,6 +5,10 @@ import json, argparse
 
 parser=argparse.ArgumentParser()
 parser.add_argument('--grass-source', type=Path, required=True)
+parser.add_argument('--grass-base', default='grass_BaseColor.png')
+parser.add_argument('--grass-normal', default='grass_normal.png')
+parser.add_argument('--grass-roughness', default='grass_roughness.png')
+parser.add_argument('--grass-name', default='grass-v2')
 args=parser.parse_args()
 out=Path(__file__).resolve().parent.parent/'assets'/'surfaces'
 out.mkdir(parents=True,exist_ok=True)
@@ -35,13 +39,16 @@ def normal_from_height(height,strength):
     dy=(np.roll(height,-1,axis=0)-np.roll(height,1,axis=0))*.5
     return np.dstack([-dx*strength,dy*strength,np.ones_like(height)])
 
-base=resize(args.grass_source/'草地_basecolor.png')
-save_base(base,'grass')
-normal=np.array(resize(args.grass_source/'草地_normal_OpenGL.png').convert('RGB'),dtype=float)/127.5-1
-rough_source=np.array(Image.open(args.grass_source/'草地_roughness.png'),dtype=np.float32)
+base=resize(args.grass_source/args.grass_base)
+save_base(base,args.grass_name)
+normal=np.array(resize(args.grass_source/args.grass_normal).convert('RGB'),dtype=float)/127.5-1
+rough_image=Image.open(args.grass_source/args.grass_roughness)
+if rough_image.mode in ('RGB','RGBA','LA','P'):
+    rough_image=rough_image.convert('L')
+rough_source=np.array(rough_image,dtype=np.float32)
 rough_source/=65535 if rough_source.max()>255 else 255
 rough=np.asarray(Image.fromarray(rough_source,'F').resize((N,N),Image.Resampling.LANCZOS))
-save_detail(normal,np.clip(rough,0,1),'grass')
+save_detail(normal,np.clip(rough,0,1),args.grass_name)
 # Seamless aggregate: periodic noise gives the asphalt no visible tile border.
 fine=periodic_noise(.65);medium=periodic_noise(2);broad=periodic_noise(16)
 asphalt=151+fine*4+medium*2+broad*1.4
@@ -60,8 +67,8 @@ grain=periodic_noise(.6)
 value=185+slabs+grain*1.6-(1-joint)*26-(1-bevel)*5
 save_base(np.dstack([value+5,value+3,value-1]),'pavers')
 save_detail(normal_from_height(bevel*1.4+grain*.05,.65),np.clip(.91+(1-joint)*.07+grain*.008,.8,1),'pavers')
-report={"resolution":[512,512],"grassSourceFiles":["草地_basecolor.png","草地_normal_OpenGL.png","草地_roughness.png"],"detailChannels":"RGB: normalized OpenGL tangent normal; A: roughness (linear)","textures":[]}
-for f in sorted(out.glob('*.webp')):
+report={"resolution":[512,512],"grassSourceFiles":[args.grass_base,args.grass_normal,args.grass_roughness],"detailChannels":"RGB: normalized tangent normal; A: roughness (linear)","textures":[]}
+for f in sorted(out/(kind+'-'+channel+'-512.webp') for kind in [args.grass_name,'asphalt','pavers'] for channel in ['base','detail']):
     im=Image.open(f)
     assert im.size==(512,512)
     report['textures'].append({'file':f.name,'size':list(im.size),'bytes':f.stat().st_size})
