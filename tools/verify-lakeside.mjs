@@ -1,8 +1,10 @@
+import { installTestTerrain } from './install-test-terrain.mjs';
 import {loadCity} from './load-city.mjs';
 import {createLakeside,lakePoint,lakeMetric,isLakeWater} from '../lakeside.js';
 import * as T from '../vendor/three.module.js';
 import assert from 'node:assert/strict';
 const {city,road}=loadCity();
+installTestTerrain(city);
 const buildings=[];city.traverse(o=>{if(/^Bld/.test(o.name))buildings.push({o,matrix:o.matrixWorld.clone()});if(o.isMesh)for(const m of Array.isArray(o.material)?o.material:[o.material])m.side=T.DoubleSide;});
 const roadGeometry=road.geometry,planet=city.getObjectByName('Planet');
 const lake=createLakeside(city);assert.equal(road.geometry,roadGeometry);for(const b of buildings)assert.ok(b.matrix.equals(b.o.matrixWorld),'Building must not move');

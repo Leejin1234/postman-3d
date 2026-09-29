@@ -7,7 +7,8 @@ import { createLakeside, isLakeWater, lakePoint } from './lakeside.js?v=20260929
 import { reduceSceneDensity } from './scene-density.js?v=20260929-9';
 import { raiseGrassLevel } from './grass-level.js?v=20260929-9';
 import { createCollisionWorld, sweepSphere } from './collision-world.js?v=20260929-2';
-import { installSurfaceMaterials } from './surface-materials.js?v=20260929-5';
+import { installSurfaceMaterials } from './surface-materials.js?v=20260929-11';
+import { installSoftTerrain, smoothTerrainNormals } from './soft-terrain.js?v=20260929-11';
 
 /* ?pc / ?mob 强制切换手机/桌面档：headless 截图和手机档的画质差别很大
    （比如手机档城市不投影），排查画面问题时必须能指定跑哪一档。 */
@@ -2285,12 +2286,15 @@ async function boot() {
   setProgress(0.52, '测量星球…');
   fitPlanet(city);
   setProgress(0.54, '连接圆弧路口…');
-  const [roundedRoads, junctionFurniture] = await Promise.all([
+  const [roundedRoads, junctionFurniture, softTerrain, terrainProps] = await Promise.all([
     withRetry('./assets/roads-rounded-v5.bin', () => fetchAsset('./assets/roads-rounded-v5.bin')),
-    withRetry('./assets/junction-furniture-v2.json', () => fetchAsset('./assets/junction-furniture-v2.json'))
+    withRetry('./assets/junction-furniture-v2.json', () => fetchAsset('./assets/junction-furniture-v2.json')),
+    withRetry('./assets/terrain-soft-v1.bin', () => fetchAsset('./assets/terrain-soft-v1.bin')),
+    withRetry('./assets/terrain-props-v1.json', () => fetchAsset('./assets/terrain-props-v1.json'))
   ]);
   installRoadGeometry(city, decodeRoadGeometry(roundedRoads));
   installJunctionFurniture(city, JSON.parse(new TextDecoder().decode(junctionFurniture)));
+  installSoftTerrain(city, decodeRoadGeometry(softTerrain), JSON.parse(new TextDecoder().decode(terrainProps)));
   setProgress(0.57, '铺开湖岸与木码头…');
   lakeside = createLakeside(city);
   if (DEBUG) console.info('Lakeside:', lakeside.stats);
@@ -2298,6 +2302,8 @@ async function boot() {
   if (DEBUG) console.info('Scene density:', density);
   const grassLevel = raiseGrassLevel(city);
   if (DEBUG) console.info('Grass level:', grassLevel);
+  const terrainNormals = smoothTerrainNormals(city);
+  if (DEBUG) console.info('Soft terrain:', terrainNormals);
   setProgress(0.59, '铺设草地与街道纹理…');
   const surfaces = await installSurfaceMaterials(city, renderer, loadTex);
   if (DEBUG) console.info('Surface textures:', surfaces);

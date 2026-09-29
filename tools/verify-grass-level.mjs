@@ -1,3 +1,4 @@
+import { installTestTerrain } from './install-test-terrain.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import * as T from '../vendor/three.module.js';
@@ -11,7 +12,7 @@ const {city,road}=loadCity();
 const bytes=fs.readFileSync('assets/roads-rounded-v5.bin');
 installRoadGeometry(city,decodeRoadGeometry(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)));
 installJunctionFurniture(city,JSON.parse(fs.readFileSync('assets/junction-furniture-v2.json')));
-createLakeside(city);reduceSceneDensity(city);
+installTestTerrain(city);createLakeside(city);reduceSceneDensity(city);
 const planet=city.getObjectByName('Planet'),before=planet.geometry.attributes.position.array.slice(),roadBefore=road.geometry.attributes.position.array.slice();
 const lake=city.getObjectByName('LakeWater').geometry, dock=city.getObjectByName('Planet_LakeDock').geometry;
 const stats=raiseGrassLevel(city),pos=planet.geometry.attributes.position,walk=602+2.6/3;

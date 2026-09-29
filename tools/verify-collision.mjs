@@ -1,3 +1,4 @@
+import { installTestTerrain } from './install-test-terrain.mjs';
 import * as T from '../vendor/three.module.js';
 import { mergeGeometries } from '../vendor/utils/BufferGeometryUtils.js';
 import { createCollisionWorld, sweepSphere } from '../collision-world.js';
@@ -74,7 +75,7 @@ let cases=0;
 const {city,road,center}=loadCity();
 const plan=buildRoundedJunctions(road);
 installJunctionFurniture(city,JSON.parse(fs.readFileSync(new URL('../assets/junction-furniture-v2.json',import.meta.url))));
-createLakeside(city);
+installTestTerrain(city);createLakeside(city);
 reduceSceneDensity(city);
 raiseGrassLevel(city);
 const world=createCollisionWorld(city,center);let roadSamples=0;const blocked=[];

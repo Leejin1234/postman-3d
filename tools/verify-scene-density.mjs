@@ -1,3 +1,4 @@
+import { installTestTerrain } from './install-test-terrain.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import * as THREE from '../vendor/three.module.js';
@@ -11,6 +12,7 @@ const { city, road } = loadCity();
 const roadBytes = fs.readFileSync('assets/roads-rounded-v5.bin');
 installRoadGeometry(city, decodeRoadGeometry(roadBytes.buffer.slice(roadBytes.byteOffset, roadBytes.byteOffset + roadBytes.byteLength)));
 installJunctionFurniture(city, JSON.parse(fs.readFileSync('assets/junction-furniture-v2.json')));
+installTestTerrain(city);
 // Exercise removal of reeds too, including loading a scene where they exist.
 createLakeside(city, { includeReeds: true });
 const before = sceneMeshStats(city), originalMeshes = [];
