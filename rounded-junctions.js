@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { tessellateJunction } from './junction-tessellation.js';
 
 const BASE = 600, ROAD = 602, ORIGINAL_WALK = 604.6;
 const WALK = ROAD + (ORIGINAL_WALK - ROAD) / 3;
@@ -141,7 +142,9 @@ export function buildRoundedJunctions(mesh) {
     for (const id of order) {
       const p = points[id];
       buffers[index].position.push(...p.toArray());
-      buffers[index].normal.push(...normal.toArray());
+      const shadingNormal = index === roadIndex
+        ? [a, b, c][id].clone().normalize().applyMatrix3(normalToLocal).normalize() : normal;
+      buffers[index].normal.push(...shadingNormal.toArray());
       buffers[index].uv.push(...uv[id]);
     }
   }
@@ -163,22 +166,13 @@ export function buildRoundedJunctions(mesh) {
       along += lengths[k];
     }
   }
-  function fillTriangle(j, a, b, c, depth = 0) {
-    // Earcut can return numerically collinear boundary triples. Projecting those
-    // to a sphere creates tilted sliver faces that overlap the real asphalt.
-    if (Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) < 1e-8) return;
-    const lengths = [a.distanceToSquared(b), b.distanceToSquared(c), c.distanceToSquared(a)];
-    const longest = Math.max(...lengths);
-    if (longest <= 144 || depth > 16) { triangle(roadIndex, world(j, a, ROAD), world(j, b, ROAD), world(j, c, ROAD)); return; }
-    const points = [a, b, c], i = lengths.indexOf(longest);
-    const u = points[i], v = points[(i + 1) % 3], w = points[(i + 2) % 3], mid = u.clone().lerp(v, 0.5);
-    fillTriangle(j, u, mid, w, depth + 1); fillTriangle(j, mid, v, w, depth + 1);
-  }
   for (const j of junctions) {
     const outline = [];
     for (const sector of j.sectors) {
       const front = sectorPath(sector, HALF), curb = sectorPath(sector, CURB), back = sectorPath(sector, OUTER);
       outline.push(...front);
+      // Match all seven 10-unit strips at the adjoining corridor mouth.
+      for (let width = -HALF + 10; width < HALF; width += 10) outline.push(mouth(sector.b, width));
       ribbon(j, front, back, WALK, WALK, walkIndex);
       ribbon(j, front, front, ROAD, WALK, curbIndex);
       ribbon(j, front, curb, WALK + 0.02, WALK + 0.02, curbIndex);
@@ -188,8 +182,10 @@ export function buildRoundedJunctions(mesh) {
     // Earcut also handles the outside of two-arm bends where the origin need not
     // lie inside the drivable polygon. A fan at the origin would create overlaps.
     const polygon = outline.filter((p, i) => !i || p.distanceToSquared(outline[i - 1]) > 1e-12);
-    const tris = THREE.ShapeUtils.triangulateShape(polygon, []);
-    for (const [a, b, c] of tris) fillTriangle(j, polygon[a], polygon[b], polygon[c]);
+    const tessellation = tessellateJunction(polygon);
+    for (const [a, b, c] of tessellation.triangles) {
+      triangle(roadIndex, ...[a, b, c].map(i => world(j, tessellation.points[i], ROAD)));
+    }
     j.outline = polygon;
   }
   const corridors = [];

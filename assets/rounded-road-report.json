@@ -193,15 +193,15 @@
   ],
   "corners": 30,
   "corridors": 15,
-  "triangles": 88399,
+  "triangles": 81195,
   "junctionCount": 10,
   "paint": {
     "sourceTriangles": 8674,
-    "triangles": 76941,
+    "triangles": 61282,
     "unmatched": 0,
     "maxOriginalGap": 0.05371219217064658
   },
-  "vertices": 469998,
-  "bytes": 15040000,
-  "compressedBytes": 2894748
+  "vertices": 401409,
+  "bytes": 12845152,
+  "compressedBytes": 3321214
 }

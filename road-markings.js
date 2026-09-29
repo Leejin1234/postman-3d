@@ -123,7 +123,10 @@ export function conformRoadMarkings(root, center, clearance = 0.012) {
               .cross(localPoint.copy(localProjected[k + 1]).sub(localProjected[0]));
             if (vertex.lengthSq() < 1e-18) continue;
             const order = vertex.dot(localNormal) < 0 ? [0, k + 1, k] : [0, k, k + 1];
-            for (const j of order) emit(indices, poly[j].weights, localProjected[j], localNormal);
+            for (const j of order) {
+              const smoothNormal = projected[j].clone().sub(center).normalize().applyMatrix3(normalToLocal).normalize();
+              emit(indices, poly[j].weights, localProjected[j], smoothNormal);
+            }
             stats.triangles++;
             emitted = true;
           }

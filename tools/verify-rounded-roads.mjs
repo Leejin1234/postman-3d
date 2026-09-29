@@ -8,15 +8,17 @@ import { decodeRoadGeometry, installJunctionFurniture } from '../road-geometry.j
 const { city, road } = loadCity();
 const plan = buildRoundedJunctions(road);
 assert.deepEqual([plan.stats.junctions, plan.stats.corners, plan.stats.corridors], [10, 30, 15]);
-const bytes = fs.readFileSync(new URL('../assets/roads-rounded-v3.bin', import.meta.url));
+const bytes = fs.readFileSync(new URL('../assets/roads-rounded-v4.bin', import.meta.url));
 const geometry = decodeRoadGeometry(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
 const positions = geometry.attributes.position, normals = geometry.attributes.normal;
 const oldBytes = fs.readFileSync(new URL('../assets/roads-rounded-v2.bin', import.meta.url));
 const oldGeometry = decodeRoadGeometry(oldBytes.buffer.slice(oldBytes.byteOffset, oldBytes.byteOffset + oldBytes.byteLength));
 const sidewalkGroup = geometry.groups.find(g => road.material[g.materialIndex].name === 'City_Sidewalk');
+const oldSidewalkGroup = oldGeometry.groups.find(g => road.material[g.materialIndex].name === 'City_Sidewalk');
+assert.equal(sidewalkGroup.count, oldSidewalkGroup.count);
 let heightChecks = 0;
 for (let i = sidewalkGroup.start; i < sidewalkGroup.start + sidewalkGroup.count; i++) {
-  const before = new THREE.Vector3().fromBufferAttribute(oldGeometry.attributes.position, i).applyMatrix4(road.matrixWorld);
+  const before = new THREE.Vector3().fromBufferAttribute(oldGeometry.attributes.position, i - sidewalkGroup.start + oldSidewalkGroup.start).applyMatrix4(road.matrixWorld);
   const after = new THREE.Vector3().fromBufferAttribute(positions, i).applyMatrix4(road.matrixWorld);
   assert.ok(Math.abs((after.length() - 602) - (before.length() - 602) / 3) < .0002, 'Sidewalk height must be one third above asphalt');
   assert.ok(before.normalize().distanceTo(after.normalize()) < 1e-6, 'Sidewalk footprint must not change');
