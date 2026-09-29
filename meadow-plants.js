@@ -21,15 +21,16 @@ export function scatterMeadow(planet, allowed = () => true) {
     const area = n.length() * .5; n.normalize();
     up.copy(a).add(b).add(c).normalize();
     if (Math.abs(n.dot(up)) < .86) continue;
-    const attempts = Math.floor(area * .42 + random());
+    const attempts = Math.floor(area * 1.4 + random());
     for (let j = 0; j < attempts; j++) {
       const u = Math.sqrt(random()), v = random();
       p.copy(a).multiplyScalar(1 - u).addScaledVector(b, u * (1 - v)).addScaledVector(c, u * v);
       const patch = .5 + .5 * Math.sin(p.x * .057 + Math.sin(p.z * .034) * 2) * Math.cos(p.y * .051 - p.z * .027);
-      if (random() > .28 + .72 * patch || lakeMetric(p) < 1.13) continue;
+      if (random() > .45 + .55 * patch || lakeMetric(p) < 1.13) continue;
       up.copy(p).normalize();
       if (!allowed(p, up)) continue;
-      const flower = random() < .09 + .25 * smooth(.55, .88, patch);
+      // Keep the existing flower coverage while adding many more separate blades.
+      const flower = random() < .025 + .067 * smooth(.55, .88, patch);
       const k = key(Math.floor(p.x / CELL), Math.floor(p.y / CELL), Math.floor(p.z / CELL));
       if (!bins.has(k)) bins.set(k, []);
       bins.get(k).push(p.x, p.y, p.z, random(), flower ? 1 : 0);
@@ -43,11 +44,11 @@ export function scatterMeadow(planet, allowed = () => true) {
 function bladeGeometry(stem = false) {
   const positions = [], colors = [];
   const dark = new T.Color(stem ? '#4b7942' : '#527c38'), light = new T.Color(stem ? '#96b66a' : '#bed578');
-  for (let j = 0; j < (stem ? 2 : 3); j++) {
+  for (let j = 0; j < (stem ? 2 : 1); j++) {
     const angle = j * 2.399, dx = Math.cos(angle), dz = Math.sin(angle);
     const width = stem ? .055 : .12, h = stem ? 1.38 : 1 - j * .13, lean = stem ? 0 : .16;
-    const points = [[-width, 0], [width, 0], [width + lean, h * .83], [lean + width * .3, h], [lean - width, h * .91]];
-    for (const index of [0, 1, 2, 0, 2, 4, 4, 2, 3]) {
+    const points = [[-width, 0], [width, 0], [width + lean, h * .9], [lean + width * .45, h], [lean - width * .45, h], [lean - width, h * .9]];
+    for (const index of [0, 1, 2, 0, 2, 5, 5, 2, 3, 5, 3, 4]) {
       const [x, y] = points[index]; positions.push(dx * x, y, dz * x);
       const color = dark.clone().lerp(light, y / h); colors.push(color.r, color.g, color.b);
     }
@@ -59,7 +60,7 @@ function bladeGeometry(stem = false) {
 }
 
 export function createMeadowPlants(scene, field, { mobile = false } = {}) {
-  const range = mobile ? 100 : 140, capacity = mobile ? 8000 : 18000;
+  const range = mobile ? 85 : 120, capacity = mobile ? 28000 : 64000;
   const uniforms = { meadowTime: { value: 0 }, meadowFocus: { value: new T.Vector3() }, meadowRange: { value: range } };
   function material(flower = false) {
     const mat = flower ? new T.MeshBasicMaterial({ color: 0xffffff, side: T.DoubleSide })
@@ -86,7 +87,7 @@ export function createMeadowPlants(scene, field, { mobile = false } = {}) {
     return mat;
   }
   const grass = new T.InstancedMesh(bladeGeometry(), material(), capacity);
-  const stems = new T.InstancedMesh(bladeGeometry(true), material(), Math.ceil(capacity * .4));
+  const stems = new T.InstancedMesh(bladeGeometry(true), material(), Math.ceil(capacity * .14));
   const blooms = new T.InstancedMesh(new T.CircleGeometry(.30, 12), material(true), stems.instanceMatrix.count);
   for (const [mesh, name] of [[grass, 'MeadowBlades'], [stems, 'MeadowStems'], [blooms, 'MeadowRoundFlowers']]) {
     mesh.name = name; mesh.count = 0; mesh.frustumCulled = false;

@@ -9,7 +9,7 @@ import { raiseGrassLevel } from './grass-level.js?v=20260929-9';
 import { createCollisionWorld, sweepSphere } from './collision-world.js?v=20260929-2';
 import { installSurfaceMaterials } from './surface-materials.js?v=20260929-11';
 import { installSoftTerrain, smoothTerrainNormals } from './soft-terrain.js?v=20260929-11';
-import { scatterMeadow, createMeadowPlants } from './meadow-plants.js?v=20260929-12';
+import { scatterMeadow, createMeadowPlants } from './meadow-plants.js?v=20260929-13';
 
 let meadowPlants = null;
 
