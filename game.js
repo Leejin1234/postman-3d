@@ -9,6 +9,9 @@ import { raiseGrassLevel } from './grass-level.js?v=20260929-9';
 import { createCollisionWorld, sweepSphere } from './collision-world.js?v=20260929-2';
 import { installSurfaceMaterials } from './surface-materials.js?v=20260929-11';
 import { installSoftTerrain, smoothTerrainNormals } from './soft-terrain.js?v=20260929-11';
+import { scatterMeadow, createMeadowPlants } from './meadow-plants.js?v=20260929-12';
+
+let meadowPlants = null;
 
 /* ?pc / ?mob 强制切换手机/桌面档：headless 截图和手机档的画质差别很大
    （比如手机档城市不投影），排查画面问题时必须能指定跑哪一档。 */
@@ -2184,6 +2187,7 @@ function loop() {
   atmosphere.update(camera, fp, _lpU, _lpE, _lpN);
   updateSeeds(time, fp, _lpU, _lpE, _lpN);
   lakeside?.update(time);
+  meadowPlants?.update(time, fp);
   for (const c of clouds) {
     c.u += c.spd * dt;
     if (c.u > 300) c.u -= 600;
@@ -2312,6 +2316,19 @@ async function boot() {
 
   setProgress(0.6, '计算碰撞地图…');
   bakeOcc(city);
+  setProgress(0.63, '种下草叶与圆形小花…');
+  const meadowField = scatterMeadow(city.getObjectByName('Planet'), (point, up) => {
+    const cell = cellOf(up, GRID.ow, GRID.oh), x = cell % GRID.ow, y = Math.floor(cell / GRID.ow);
+    // Leave a full raster-cell margin around pavement and solid footprints.
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const row = Math.max(0, Math.min(GRID.oh - 1, y + dy));
+      const index = row * GRID.ow + (x + dx + GRID.ow) % GRID.ow;
+      if (GRID.surf?.[index] || GRID.occ?.[index]) return false;
+    }
+    return true;
+  });
+  meadowPlants = createMeadowPlants(scene, meadowField, { mobile: IS_MOBILE });
+  if (DEBUG) console.info('Meadow plants:', meadowPlants.stats);
   buildMiniImage();
   await new Promise(r => setTimeout(r, 16));
 
