@@ -8,7 +8,7 @@ import { decodeRoadGeometry, installJunctionFurniture } from '../road-geometry.j
 const { city, road } = loadCity();
 const plan = buildRoundedJunctions(road);
 assert.deepEqual([plan.stats.junctions, plan.stats.corners, plan.stats.corridors], [10, 30, 15]);
-const bytes = fs.readFileSync(new URL('../assets/roads-rounded-v4.bin', import.meta.url));
+const bytes = fs.readFileSync(new URL('../assets/roads-rounded-v5.bin', import.meta.url));
 const geometry = decodeRoadGeometry(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
 const positions = geometry.attributes.position, normals = geometry.attributes.normal;
 const oldBytes = fs.readFileSync(new URL('../assets/roads-rounded-v2.bin', import.meta.url));
@@ -60,6 +60,7 @@ for (let i = curbGroup.start; i < curbGroup.start + curbGroup.count; i += 3) {
 }
 const origin = new THREE.Vector3();
 let roadChecks = 0, walkChecks = 0, minGap = Infinity, maxGap = -Infinity;
+let grassCurbChecks = 0;
 function assertGround(p, mesh, label) {
   ray.set(origin, p.clone().normalize());
   let hits = ray.intersectObject(mesh, false);
@@ -75,6 +76,11 @@ function assertGround(p, mesh, label) {
 }
 // Follow every rounded corner through its full sweep, including reflex bends.
 for (const [ji, junction] of plan.junctions.entries()) for (const [si, sector] of junction.sectors.entries()) {
+  for (const p of plan.sectorPath(sector, 64.3).slice(1, -1)) {
+    const height = assertGround(plan.world(junction, p, 602 + 2.6 / 3 + .02), curb, 'Grass-side curb cap');
+    assert.ok(height > 602.8 && height < 602.9, 'Grass curb must stay at sidewalk height');
+    grassCurbChecks++;
+  }
   // The cap must cover the new narrow edge, leaving the old broad strip paved.
   const narrow = plan.sectorPath(sector, 35.7), paved = plan.sectorPath(sector, 39);
   for (let k = 1; k < narrow.length - 1; k++) {
@@ -89,6 +95,12 @@ for (const corridor of plan.corridors) for (let k = 0; k <= 20; k++) {
   const s = corridor.start + (corridor.end - corridor.start) * k / 20;
   const p = corridor.j.up.clone().multiplyScalar(Math.cos(s)).addScaledVector(corridor.arm.direction, Math.sin(s)).multiplyScalar(602);
   assertGround(p, asphalt, 'Corridor continuity'); roadChecks++;
+  if (k > 0 && k < 20) for (const sign of [-1, 1]) {
+    const edge = p.clone().multiplyScalar(600 / 602).addScaledVector(corridor.side, sign * 64.3);
+    const height = assertGround(edge, curb, 'Straight grass-side curb cap');
+    assert.ok(height > 602.8 && height < 602.9);
+    grassCurbChecks++;
+  }
 }
 // Sample paint throughout the entire planet, rather than just the initial view.
 const paint = geometry.groups[1], stride = Math.max(1, Math.floor(paint.count / 3 / 1200));
@@ -115,4 +127,4 @@ for (const placement of placements) {
 }
 console.log(JSON.stringify({ junctions: 10, roundedCorners: 30, corridors: 15, checkedFaces,
   reversed, invalid, roadChecks, walkChecks, minPaintGap: minGap, maxPaintGap: maxGap,
-  relocatedFurniture: placements.length, mappedCurbTriangles, heightChecks, result: 'PASS' }, null, 2));
+  relocatedFurniture: placements.length, mappedCurbTriangles, heightChecks, grassCurbChecks, result: 'PASS' }, null, 2));

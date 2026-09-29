@@ -4,14 +4,14 @@
     "trees": 1124,
     "groundPlants": 937,
     "meshes": 3001,
-    "triangles": 2477835
+    "triangles": 2483705
   },
   "after": {
     "buildings": 276,
     "trees": 750,
     "groundPlants": 0,
     "meshes": 1552,
-    "triangles": 1398287
+    "triangles": 1404157
   },
   "removed": {
     "buildings": 138,
@@ -20,7 +20,7 @@
     "meshes": 1449,
     "triangles": 1079548
   },
-  "triangleReductionPercent": 43.6,
+  "triangleReductionPercent": 43.5,
   "removedObstacleProbes": 512,
   "collisionObjects": 1525,
   "result": "PASS"

@@ -8,7 +8,7 @@ import { reduceSceneDensity, sceneMeshStats } from '../scene-density.js';
 import { raiseGrassLevel } from '../grass-level.js';
 
 const {city,road}=loadCity();
-const bytes=fs.readFileSync('assets/roads-rounded-v4.bin');
+const bytes=fs.readFileSync('assets/roads-rounded-v5.bin');
 installRoadGeometry(city,decodeRoadGeometry(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)));
 installJunctionFurniture(city,JSON.parse(fs.readFileSync('assets/junction-furniture-v2.json')));
 createLakeside(city);reduceSceneDensity(city);

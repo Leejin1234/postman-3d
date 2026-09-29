@@ -177,6 +177,7 @@ export function buildRoundedJunctions(mesh) {
       ribbon(j, front, front, ROAD, WALK, curbIndex);
       ribbon(j, front, curb, WALK + 0.02, WALK + 0.02, curbIndex);
       ribbon(j, back, back, WALK, 600, curbIndex);
+      ribbon(j, back, sectorPath(sector, OUTER - (CURB - HALF)), WALK + .02, WALK + .02, curbIndex);
       ribbon(j, sectorPath(sector, 28.3), sectorPath(sector, 30.7), ROAD + 0.02, ROAD + 0.02, lineIndex);
     }
     // Earcut also handles the outside of two-arm bends where the origin need not
@@ -213,6 +214,8 @@ export function buildRoundedJunctions(mesh) {
         quad(curbIndex, at(a, sign * HALF, ROAD), at(b, sign * HALF, ROAD), at(b, sign * HALF, WALK), at(a, sign * HALF, WALK), u0, u1);
         quad(curbIndex, at(a, sign * HALF, WALK + .02), at(b, sign * HALF, WALK + .02), at(b, sign * CURB, WALK + .02), at(a, sign * CURB, WALK + .02), u0, u1);
         quad(curbIndex, at(a, sign * OUTER, WALK), at(b, sign * OUTER, WALK), at(b, sign * OUTER, 600), at(a, sign * OUTER, 600), u0, u1);
+        const innerEdge = sign * (OUTER - (CURB - HALF));
+        quad(curbIndex, at(a, sign * OUTER, WALK + .02), at(b, sign * OUTER, WALK + .02), at(b, innerEdge, WALK + .02), at(a, innerEdge, WALK + .02), u0, u1);
       }
     }
     corridors.push({ j, other, arm, reverse, start, end, side });

@@ -8,7 +8,7 @@ import { decodeRoadGeometry, installRoadGeometry, installJunctionFurniture } fro
 import { createCollisionWorld } from '../collision-world.js';
 
 const { city, road } = loadCity();
-const roadBytes = fs.readFileSync('assets/roads-rounded-v4.bin');
+const roadBytes = fs.readFileSync('assets/roads-rounded-v5.bin');
 installRoadGeometry(city, decodeRoadGeometry(roadBytes.buffer.slice(roadBytes.byteOffset, roadBytes.byteOffset + roadBytes.byteLength)));
 installJunctionFurniture(city, JSON.parse(fs.readFileSync('assets/junction-furniture-v2.json')));
 // Exercise removal of reeds too, including loading a scene where they exist.
