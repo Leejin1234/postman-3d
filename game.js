@@ -3,7 +3,8 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { createAtmosphere, createDriftingSeeds } from './atmosphere.js?v=20260928';
 import { decodeRoadGeometry, installRoadGeometry, installJunctionFurniture } from './road-geometry.js?v=20260928-4';
-import { createLakeside, isLakeWater, lakePoint } from './lakeside.js?v=20260929-2';
+import { createLakeside, isLakeWater, lakePoint } from './lakeside.js?v=20260929-8';
+import { reduceSceneDensity } from './scene-density.js?v=20260929-8';
 import { createCollisionWorld, sweepSphere } from './collision-world.js?v=20260929-2';
 import { installSurfaceMaterials } from './surface-materials.js?v=20260929-5';
 
@@ -2292,6 +2293,8 @@ async function boot() {
   setProgress(0.57, '铺开湖岸与木码头…');
   lakeside = createLakeside(city);
   if (DEBUG) console.info('Lakeside:', lakeside.stats);
+  const density = reduceSceneDensity(city);
+  if (DEBUG) console.info('Scene density:', density);
   setProgress(0.59, '铺设草地与街道纹理…');
   const surfaces = await installSurfaceMaterials(city, renderer, loadTex);
   if (DEBUG) console.info('Surface textures:', surfaces);
@@ -2304,8 +2307,7 @@ async function boot() {
   await new Promise(r => setTimeout(r, 16));
 
   setProgress(0.66, '铺开街道与树影…');
-  /* 地表本身不能描边：反向壳会变成一个套住整个星球的黑球。
-     945 丛地被草也跳过——它们只有巴掌大，描边看不出来，却要多一倍提交。 */
+  /* 减少场景物件后再创建描边；地表本身不能描边，避免包住整个星球。 */
   const inked = [];
   city.traverse(o => { if (o.isMesh && !TERRAIN.test(o.name) && !/^Grass/i.test(o.name)) inked.push(o); });
   for (const o of inked) addOutline(o, 0.015 * S);
