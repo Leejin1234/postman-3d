@@ -3,10 +3,30 @@ import { mergeGeometries } from './vendor/utils/BufferGeometryUtils.js';
 
 const hash = name => { let h = 2166136261; for (const ch of name) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return h >>> 0; };
 
+// Analytic disks keep a genuinely circular silhouette with only two triangles.
+function circularLeaves(material) {
+  material.onBeforeCompile = shader => {
+    shader.vertexShader = 'varying vec2 leafDiskUv;\n' + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nleafDiskUv = uv;');
+    shader.fragmentShader = 'varying vec2 leafDiskUv;\n' + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+      if (leafDiskUv.x >= 0.0) {
+        vec2 disk = leafDiskUv * 2.0 - 1.0;
+        if (dot(disk, disk) > 1.0) discard;
+      }`);
+  };
+  material.customProgramCacheKey = () => 'circular-tree-leaves-v1';
+  return material;
+}
+
+export function createTreeMaterial() {
+  return circularLeaves(new T.MeshLambertMaterial({vertexColors:true,side:T.DoubleSide}));
+}
+
 // Rounded overlapping foliage inspired by brainchildpl's stylized tree tutorial.
 export function buildStylizedTree(seed = 1, stride = 1) {
   const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
-  const parts = [], leafPositions = [], leafNormals = [], leafColors = [];
+  const parts = [], leafPositions = [], leafNormals = [], leafColors = [], leafUvs = [];
   const bark = new T.Color('#65554a'), barkLight = new T.Color('#877260');
   function branch(start, end, bottom, top) {
     const a = new T.Vector3(...start), b = new T.Vector3(...end), d = b.clone().sub(a);
@@ -18,7 +38,8 @@ export function buildStylizedTree(seed = 1, stride = 1) {
       const color = bark.clone().lerp(barkLight, .25 + .4 * Math.max(0, geo.attributes.normal.getX(i)));
       colors.push(color.r, color.g, color.b);
     }
-    geo.deleteAttribute('uv'); geo.setAttribute('color', new T.Float32BufferAttribute(colors, 3)); parts.push(geo);
+    geo.setAttribute('uv',new T.Float32BufferAttribute(new Float32Array(geo.attributes.position.count*2).fill(-2),2));
+    geo.setAttribute('color', new T.Float32BufferAttribute(colors, 3)); parts.push(geo);
   }
   branch([0, 0, 0], [.035, .29, -.012], .049, .034);
   branch([.035, .28, -.012], [-.035, .49, .025], .035, .024);
@@ -27,7 +48,7 @@ export function buildStylizedTree(seed = 1, stride = 1) {
   branch([.17, .54, -.035], [.21, .77, -.015], .017, .006);
   branch([-.045, .48, .02], [-.045, .73, .16], .021, .007);
   const crowns = [[-.17,.71,0,.23,.23,.23],[.19,.76,-.015,.24,.25,.23],[-.02,.89,.015,.24,.22,.22],[-.03,.75,.18,.22,.20,.20],[.015,.70,-.17,.24,.21,.20]];
-  const dark = new T.Color('#bd7277'), mid = new T.Color('#e8908a'), light = new T.Color('#f6b2a0');
+  const dark = new T.Color('#39734b'), mid = new T.Color('#78a653'), light = new T.Color('#bcd783');
   const center = new T.Vector3(), normal = new T.Vector3(), tangent = new T.Vector3(), bitangent = new T.Vector3(), point = new T.Vector3();
   for (const [x,y,z,rx,ry,rz] of crowns) {
     for (let i = 0; i < 96; i++) {
@@ -41,20 +62,20 @@ export function buildStylizedTree(seed = 1, stride = 1) {
       bitangent.normalize(); tangent.crossVectors(bitangent, normal).normalize();
       tangent.applyAxisAngle(normal, random() * Math.PI * 2);
       bitangent.crossVectors(normal,tangent).normalize();
-      const length = (.069 + random() * .023) * Math.sqrt(stride), width = length * (.72 + random() * .14);
+      const radius = (.064 + random() * .022) * Math.sqrt(stride);
+      random(); // Preserve all other random choices and placements.
       const tint = T.MathUtils.clamp((center.y - .50) / .52 + (random() - .5) * .24, 0, 1);
       const color = tint < .5 ? dark.clone().lerp(mid, tint * 2) : mid.clone().lerp(light, (tint - .5) * 2);
       if (i % stride !== 0) continue;
-      // Broad six-sided oval; four triangles keep denser leaves within the budget.
-      const shape = [[0,-length,0],[-width,-length*.48,.005],[-width,length*.48,.005],
-        [0,length,0],[width,length*.48,.005],[width,-length*.48,.005]];
-      for (const index of [0,1,5,5,1,2,5,2,4,4,2,3]) {
-        const v = shape[index]; point.copy(center).addScaledVector(tangent,v[1]).addScaledVector(bitangent,v[0]).addScaledVector(normal,v[2]);
+      const shape = [[-1,-1],[1,-1],[1,1],[-1,1]];
+      for (const index of [0,2,1,0,3,2]) {
+        const v = shape[index]; point.copy(center).addScaledVector(tangent,v[1]*radius).addScaledVector(bitangent,v[0]*radius);
         leafPositions.push(point.x,point.y,point.z);
+        leafUvs.push((v[0]+1)*.5,(v[1]+1)*.5);
         // Use crown normals for cohesive soft foliage lighting.
         const ny = normal.y * .6 + .4, nl = Math.hypot(normal.x,ny,normal.z);
         leafNormals.push(normal.x/nl,ny/nl,normal.z/nl);
-        const shade = (index === 2 || index === 4) ? 1.025 : 1;
+        const shade = 1;
         leafColors.push(color.r * shade,color.g * shade,color.b * shade);
       }
     }
@@ -63,6 +84,7 @@ export function buildStylizedTree(seed = 1, stride = 1) {
   leaves.setAttribute('position',new T.Float32BufferAttribute(leafPositions,3));
   leaves.setAttribute('normal',new T.Float32BufferAttribute(leafNormals,3));
   leaves.setAttribute('color',new T.Float32BufferAttribute(leafColors,3));
+  leaves.setAttribute('uv',new T.Float32BufferAttribute(leafUvs,2));
   const trunk = mergeGeometries(parts, false), geometry = mergeGeometries([trunk,leaves], false);
   for (const part of [...parts,leaves]) part.dispose();
   geometry.computeBoundingBox(); geometry.computeBoundingSphere();
@@ -75,7 +97,8 @@ export function replaceStylizedTrees(city, { mobile = false } = {}) {
   const variants = Array.from({length:6}, (_, i) => buildStylizedTree(817 + i * 397, mobile ? 2 : 1));
   const distant = Array.from({length:6}, (_, i) => buildStylizedTree(817 + i * 397, 4));
   const profiles = new Map();
-  const material = new T.MeshLambertMaterial({ vertexColors:true, side:T.DoubleSide });
+  const material = createTreeMaterial();
+  const depthMaterial = circularLeaves(new T.MeshDepthMaterial({depthPacking:T.RGBADepthPacking,side:T.DoubleSide}));
   material.name = 'StylizedTree';
   const point = new T.Vector3(), pivot = new T.Vector3(), up = new T.Vector3(), local = new T.Vector3();
   const axis = new T.Vector3(0,1,0), q = new T.Quaternion(), yaw = new T.Quaternion(), scale = new T.Vector3();
@@ -122,6 +145,7 @@ export function replaceStylizedTrees(city, { mobile = false } = {}) {
     oldTriangles += (tree.geometry.index?.count ?? pos.count)/3;
     matrix.decompose(tree.position,tree.quaternion,tree.scale);
     tree.geometry=profiles.get(profileKey).geometry; tree.material=material;
+    tree.customDepthMaterial=depthMaterial;
     tree.userData.collisionGeometry=profiles.get(profileKey).trunk;
     tree.userData.stylizedTree=true;
     tree.userData.treeLod={near:tree.geometry,far:profiles.get(profileKey).far};

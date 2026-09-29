@@ -10,7 +10,7 @@ import { createCollisionWorld, sweepSphere } from './collision-world.js?v=202609
 import { installSurfaceMaterials } from './surface-materials.js?v=20260929-11';
 import { installSoftTerrain, smoothTerrainNormals } from './soft-terrain.js?v=20260929-11';
 import { scatterMeadow, createMeadowPlants } from './meadow-plants.js?v=20260929-14';
-import { replaceStylizedTrees } from './stylized-trees.js?v=20260929-17';
+import { replaceStylizedTrees } from './stylized-trees.js?v=20260929-18';
 import { roundSceneRocks } from './rounded-rocks.js?v=20260929-17';
 import { installFloatingStick } from './floating-stick.js?v=20260929-16';
 
