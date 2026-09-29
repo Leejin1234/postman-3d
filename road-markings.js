@@ -104,7 +104,9 @@ export function conformRoadMarkings(root, center, clearance = 0.012) {
           const projected = poly.map(v => {
             const scale = road.height / road.normal.dot(v.p);
             stats.maxOriginalGap = Math.max(stats.maxOriginalGap, v.p.length() * (1 - scale));
-            return v.p.clone().multiplyScalar(scale).addScaledVector(road.normal, clearance).add(center);
+            // Keep fragments inside the same radial face cone. A face-normal
+            // offset can push thin fragments sideways across a curved seam.
+            return v.p.clone().multiplyScalar(scale + clearance / v.p.length()).add(center);
           });
           localNormal.copy(road.normal).applyMatrix3(normalToLocal).normalize();
           // Test winding in the same local Float32 coordinates sent to the GPU.

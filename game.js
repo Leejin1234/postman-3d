@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { createAtmosphere, createDriftingSeeds } from './atmosphere.js?v=20260928';
-import { conformRoadMarkings } from './road-markings.js?v=20260928-3';
+import { decodeRoadGeometry, installRoadGeometry, installJunctionFurniture } from './road-geometry.js?v=20260928-4';
 
 /* ?pc / ?mob 强制切换手机/桌面档：headless 截图和手机档的画质差别很大
    （比如手机档城市不投影），排查画面问题时必须能指定跑哪一档。 */
@@ -2323,7 +2323,7 @@ async function boot() {
   const c = await openCache();
   if (c) {
     const cached = await withTimeout(c.match('./assets/planet-city.fbx'), 6000, null);
-    setTip(cached ? '本机已有缓存，马上就好' : '首次加载约 16MB，下载一次后会存到本机，之后秒开');
+    setTip(cached ? '本机已有缓存，马上就好' : '首次加载约 19MB，下载一次后会存到本机，之后秒开');
   } else {
     setTip('本机缓存不可用（需要 https 打开），每次都要重新下载');
   }
@@ -2376,8 +2376,13 @@ async function boot() {
 
   setProgress(0.52, '测量星球…');
   fitPlanet(city);
-  const roadMarkings = conformRoadMarkings(city, PLANET.C);
-  if (DEBUG) console.info('Road markings conformed:', roadMarkings);
+  setProgress(0.54, '连接圆弧路口…');
+  const [roundedRoads, junctionFurniture] = await Promise.all([
+    withRetry('./assets/roads-rounded-v1.bin', () => fetchAsset('./assets/roads-rounded-v1.bin')),
+    withRetry('./assets/junction-furniture-v1.json', () => fetchAsset('./assets/junction-furniture-v1.json'))
+  ]);
+  installRoadGeometry(city, decodeRoadGeometry(roundedRoads));
+  installJunctionFurniture(city, JSON.parse(new TextDecoder().decode(junctionFurniture)));
   bakeGround(city);
   await new Promise(r => setTimeout(r, 16));
 
