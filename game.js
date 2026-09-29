@@ -3,6 +3,7 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { createAtmosphere, createDriftingSeeds } from './atmosphere.js?v=20260928';
 import { decodeRoadGeometry, installRoadGeometry, installJunctionFurniture } from './road-geometry.js?v=20260928-4';
+import { createLakeside, isLakeWater, lakePoint } from './lakeside.js?v=20260929-1';
 
 /* ?pc / ?mob 强制切换手机/桌面档：headless 截图和手机档的画质差别很大
    （比如手机档城市不投影），排查画面问题时必须能指定跑哪一档。 */
@@ -132,6 +133,7 @@ const atmosphere = createAtmosphere(scene, renderer, sun, hemisphere, ambient);
 const updateSeeds = createDriftingSeeds(scene, IS_MOBILE ? 20 : 42);
 let scenicView = new URLSearchParams(location.search).has('scenic');
 let evening = false;
+let lakeside = null;
 let introPreview = !DEBUG && !/(?:\?|&)(?:selftest|cartest|footest)(?:&|$)/.test(location.search);
 
 /* Matte postcard palette; preserve the source model's faceted normals. */
@@ -897,6 +899,7 @@ const BLOCKING = /^(Bld|Tree|Rock|Street)/i;
    occ 是 1 字节挡路标记，必须细，不然贴着楼角走会穿墙。 */
 const GRID = { gw: 1280, gh: 640, ground: null, ow: 3072, oh: 1536, occ: null, surf: null, img: null };
 const M_DRIVE = 1, M_PAVE = 2;   // surf 的两个标记位：车道 / 人行道+路缘
+const _lakeWorld = new THREE.Vector3();
 
 /* 方向 -> 网格下标。d 必须是单位向量（要用 d.y 求极角）。 */
 function cellOf(d, w, h) {
@@ -910,6 +913,7 @@ function groundR(dir) {
   return GRID.ground ? GRID.ground[cellOf(dir, GRID.gw, GRID.gh)] : PLANET.R;
 }
 function blockedDir(dir) {
+  if (isLakeWater(_lakeWorld.copy(dir).multiplyScalar(600).add(PLANET.C))) return true;
   return GRID.occ ? GRID.occ[cellOf(dir, GRID.ow, GRID.oh)] === 1 : false;
 }
 /* 是不是车道（电动车、车流、出生点只认这个）。没烘出掩码时一律当成是。 */
@@ -1855,13 +1859,17 @@ function buildMiniImage() {
   const g = cv.getContext('2d');
   const img = g.createImageData(W, H);
   for (let v = 0; v < H; v++) {
+    const theta = (v + 0.5) / H * Math.PI;
     for (let u = 0; u < W; u++) {
       const i = v * W + u;
       const rel = GRID.ground[i] - PLANET.R;
       const oi = Math.min(GRID.oh - 1, (v * GRID.oh / H) | 0) * GRID.ow +
         Math.min(GRID.ow - 1, (u * GRID.ow / W) | 0);
       let r, gg, b;
-      if (GRID.occ && GRID.occ[oi]) { r = 186; gg = 178; b = 166; }   // 楼 / 树 / 石
+      const phi = ((u + 0.5) / W - 0.5) * Math.PI * 2;
+      _lakeWorld.set(Math.sin(theta) * Math.sin(phi), Math.cos(theta), Math.sin(theta) * Math.cos(phi)).multiplyScalar(600).add(PLANET.C);
+      if (isLakeWater(_lakeWorld)) { r = 89; gg = 148; b = 145; }
+      else if (GRID.occ && GRID.occ[oi]) { r = 186; gg = 178; b = 166; }   // 楼 / 树 / 石
       else if (GRID.surf && (GRID.surf[oi] & M_DRIVE)) { r = 71; gg = 76; b = 84; }   // 车道，跟 CITY_TINT 一致
       else if (GRID.surf && GRID.surf[oi]) { r = 120; gg = 116; b = 106; }           // 人行道
       else if (rel > FLAT * 2) { r = 150; gg = 132; b = 104; }        // 山
@@ -2275,6 +2283,7 @@ function loop() {
 
   atmosphere.update(camera, fp, _lpU, _lpE, _lpN);
   updateSeeds(time, fp, _lpU, _lpE, _lpN);
+  lakeside?.update(time);
   for (const c of clouds) {
     c.u += c.spd * dt;
     if (c.u > 300) c.u -= 600;
@@ -2383,6 +2392,9 @@ async function boot() {
   ]);
   installRoadGeometry(city, decodeRoadGeometry(roundedRoads));
   installJunctionFurniture(city, JSON.parse(new TextDecoder().decode(junctionFurniture)));
+  setProgress(0.57, '铺开湖岸与木码头…');
+  lakeside = createLakeside(city);
+  if (DEBUG) console.info('Lakeside:', lakeside.stats);
   bakeGround(city);
   await new Promise(r => setTimeout(r, 16));
 
@@ -2465,6 +2477,19 @@ async function boot() {
 
   setProgress(0.93, '投放邮箱…');
   state.q.copy(pickSpawn());
+  // Shareable lake view: start on the existing street facing the new scenery.
+  if (new URLSearchParams(location.search).has('lake')) {
+    const lakeTarget = lakePoint(0, 0);
+    let best = null;
+    for (let x = -230; x <= 30; x += 8) for (let z = 160; z <= 290; z += 8) {
+      const p = lakePoint(x, z, 602), up = p.clone().sub(PLANET.C).normalize();
+      const q = frameFromDir(up, lakeTarget.clone().sub(p));
+      if (!driveAt(q, CFG.bikeRadius) || blockedAt(q, 3 * S)) continue;
+      const score = Math.abs(x + 180) + Math.abs(z - 215);
+      if (!best || score < best.score) best = { q: q.clone(), score };
+    }
+    if (best) state.q.copy(best.q);
+  }
   atmosphere.orientSun(state.q);
   state.gr = undefined;
   syncBody(player, state.q, 0, state, 1);
