@@ -4,7 +4,8 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 import { createAtmosphere, createDriftingSeeds } from './atmosphere.js?v=20260928';
 import { decodeRoadGeometry, installRoadGeometry, installJunctionFurniture } from './road-geometry.js?v=20260928-4';
 import { createLakeside, isLakeWater, lakePoint } from './lakeside.js?v=20260929-8';
-import { reduceSceneDensity } from './scene-density.js?v=20260929-8';
+import { reduceSceneDensity } from './scene-density.js?v=20260929-9';
+import { raiseGrassLevel } from './grass-level.js?v=20260929-9';
 import { createCollisionWorld, sweepSphere } from './collision-world.js?v=20260929-2';
 import { installSurfaceMaterials } from './surface-materials.js?v=20260929-5';
 
@@ -2295,6 +2296,8 @@ async function boot() {
   if (DEBUG) console.info('Lakeside:', lakeside.stats);
   const density = reduceSceneDensity(city);
   if (DEBUG) console.info('Scene density:', density);
+  const grassLevel = raiseGrassLevel(city);
+  if (DEBUG) console.info('Grass level:', grassLevel);
   setProgress(0.59, '铺设草地与街道纹理…');
   const surfaces = await installSurfaceMaterials(city, renderer, loadTex);
   if (DEBUG) console.info('Surface textures:', surfaces);

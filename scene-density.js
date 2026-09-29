@@ -66,6 +66,7 @@ export function reduceSceneDensity(city) {
     if (!retainedGeometry.has(geometry)) geometry.dispose();
   }
   const after = sceneMeshStats(city);
+  if (after.groundPlants !== 0) throw new Error('Ground plant cleanup incomplete');
   const result = { before, after, removed: {
     buildings: before.buildings - after.buildings,
     trees: before.trees - after.trees,

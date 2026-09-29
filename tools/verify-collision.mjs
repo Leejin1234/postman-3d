@@ -5,6 +5,7 @@ import { loadCity } from './load-city.mjs';
 import { buildRoundedJunctions } from '../rounded-junctions.js';
 import { createLakeside, lakePoint, isLakeWater } from '../lakeside.js';
 import { reduceSceneDensity } from '../scene-density.js';
+import { raiseGrassLevel } from '../grass-level.js';
 import { installJunctionFurniture } from '../road-geometry.js';
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
@@ -75,6 +76,7 @@ const plan=buildRoundedJunctions(road);
 installJunctionFurniture(city,JSON.parse(fs.readFileSync(new URL('../assets/junction-furniture-v2.json',import.meta.url))));
 createLakeside(city);
 reduceSceneDensity(city);
+raiseGrassLevel(city);
 const world=createCollisionWorld(city,center);let roadSamples=0;const blocked=[];
 for(const c of plan.corridors)for(let k=0;k<=20;k++){
   const s=c.start+(c.end-c.start)*k/20;
