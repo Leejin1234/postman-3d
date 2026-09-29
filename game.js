@@ -5,7 +5,7 @@ import { createAtmosphere, createDriftingSeeds } from './atmosphere.js?v=2026092
 import { decodeRoadGeometry, installRoadGeometry, installJunctionFurniture } from './road-geometry.js?v=20260928-4';
 import { createLakeside, isLakeWater, lakePoint } from './lakeside.js?v=20260929-2';
 import { createCollisionWorld, sweepSphere } from './collision-world.js?v=20260929-2';
-import { installSurfaceMaterials } from './surface-materials.js?v=20260929-4';
+import { installSurfaceMaterials } from './surface-materials.js?v=20260929-5';
 
 /* ?pc / ?mob 强制切换手机/桌面档：headless 截图和手机档的画质差别很大
    （比如手机档城市不投影），排查画面问题时必须能指定跑哪一档。 */
@@ -2284,7 +2284,7 @@ async function boot() {
   fitPlanet(city);
   setProgress(0.54, '连接圆弧路口…');
   const [roundedRoads, junctionFurniture] = await Promise.all([
-    withRetry('./assets/roads-rounded-v1.bin', () => fetchAsset('./assets/roads-rounded-v1.bin')),
+    withRetry('./assets/roads-rounded-v2.bin', () => fetchAsset('./assets/roads-rounded-v2.bin')),
     withRetry('./assets/junction-furniture-v1.json', () => fetchAsset('./assets/junction-furniture-v1.json'))
   ]);
   installRoadGeometry(city, decodeRoadGeometry(roundedRoads));

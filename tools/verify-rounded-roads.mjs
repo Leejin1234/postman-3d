@@ -8,7 +8,7 @@ import { decodeRoadGeometry, installJunctionFurniture } from '../road-geometry.j
 const { city, road } = loadCity();
 const plan = buildRoundedJunctions(road);
 assert.deepEqual([plan.stats.junctions, plan.stats.corners, plan.stats.corridors], [10, 30, 15]);
-const bytes = fs.readFileSync(new URL('../assets/roads-rounded-v1.bin', import.meta.url));
+const bytes = fs.readFileSync(new URL('../assets/roads-rounded-v2.bin', import.meta.url));
 const geometry = decodeRoadGeometry(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
 const positions = geometry.attributes.position, normals = geometry.attributes.normal;
 let reversed = 0, invalid = 0, checkedFaces = 0;
@@ -35,6 +35,16 @@ function materialMesh(index) {
   mesh.updateMatrixWorld(true); return mesh;
 }
 const asphalt = materialMesh(0), sidewalk = materialMesh(2), ray = new THREE.Raycaster();
+const curbIndex = road.material.findIndex(m => m.name === 'City_Curb');
+const curb = materialMesh(curbIndex);
+const curbGroup = geometry.groups.find(g => g.materialIndex === curbIndex);
+let mappedCurbTriangles = 0;
+for (let i = curbGroup.start; i < curbGroup.start + curbGroup.count; i += 3) {
+  const uv = [0, 1, 2].map(k => new THREE.Vector2().fromBufferAttribute(geometry.attributes.uv, i + k));
+  assert.ok(uv.every(p => Number.isFinite(p.x) && Number.isFinite(p.y)));
+  assert.ok(Math.abs(uv[1].clone().sub(uv[0]).cross(uv[2].clone().sub(uv[0]))) > 1e-10, 'Curb texture UV must have area');
+  mappedCurbTriangles++;
+}
 const origin = new THREE.Vector3();
 let roadChecks = 0, walkChecks = 0, minGap = Infinity, maxGap = -Infinity;
 function assertGround(p, mesh, label) {
@@ -52,6 +62,13 @@ function assertGround(p, mesh, label) {
 }
 // Follow every rounded corner through its full sweep, including reflex bends.
 for (const [ji, junction] of plan.junctions.entries()) for (const [si, sector] of junction.sectors.entries()) {
+  // The cap must cover the new narrow edge, leaving the old broad strip paved.
+  const narrow = plan.sectorPath(sector, 35.7), paved = plan.sectorPath(sector, 39);
+  for (let k = 1; k < narrow.length - 1; k++) {
+    assertGround(plan.world(junction, narrow[k], 604.62), curb, 'Narrow curb continuity');
+    ray.set(origin, plan.world(junction, paved[k], 604.62).normalize());
+    assert.equal(ray.intersectObject(curb, false).length, 0, 'Old wide cap must be removed');
+  }
   for (const [pi, p] of plan.sectorPath(sector, 20).entries()) { assertGround(plan.world(junction, p, 602), asphalt, `J${ji} turn ${si} sample ${pi} (${p.x},${p.y})`); roadChecks++; }
   for (const p of plan.sectorPath(sector, 53)) { assertGround(plan.world(junction, p, 604.6), sidewalk, `J${ji} sidewalk ${si}`); walkChecks++; }
 }
@@ -78,4 +95,4 @@ for (const placement of placements) {
 }
 console.log(JSON.stringify({ junctions: 10, roundedCorners: 30, corridors: 15, checkedFaces,
   reversed, invalid, roadChecks, walkChecks, minPaintGap: minGap, maxPaintGap: maxGap,
-  relocatedFurniture: placements.length, result: 'PASS' }, null, 2));
+  relocatedFurniture: placements.length, mappedCurbTriangles, result: 'PASS' }, null, 2));

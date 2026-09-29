@@ -57,7 +57,7 @@ function surfaceMaterial(name, base, detail, { color, period, strength, grass = 
 }
 
 export async function installSurfaceMaterials(city, renderer, loadTexture) {
-  const kinds = ['grass-v2', 'asphalt', 'pavers'];
+  const kinds = ['grass-v2', 'asphalt', 'pavers', 'curb-v1'];
   const textures = await Promise.all(kinds.map(async kind => {
     const [base, detail] = await Promise.all(['base', 'detail'].map(channel =>
       loadTexture(`./assets/surfaces/${kind}-${channel}-512.webp`)));
@@ -72,12 +72,18 @@ export async function installSurfaceMaterials(city, renderer, loadTexture) {
     }
     return { base, detail };
   }));
-  const [grass, asphalt, pavers] = textures;
+  const [grass, asphalt, pavers, curb] = textures;
   const replacements = {
     City_Grass: surfaceMaterial('City_Grass', grass.base, grass.detail, { color: 0xffffff, period: 24, strength: .27, grass: true }),
     City_Meadow: surfaceMaterial('City_Meadow', grass.base, grass.detail, { color: 0xf1edda, period: 28, strength: .22, grass: true }),
     City_Road: surfaceMaterial('City_Road', asphalt.base, asphalt.detail, { color: 0xc2c4be, period: 12, strength: .16 }),
-    City_Sidewalk: surfaceMaterial('City_Sidewalk', pavers.base, pavers.detail, { color: 0xe4e1d0, period: 12, strength: .24 })
+    City_Sidewalk: surfaceMaterial('City_Sidewalk', pavers.base, pavers.detail, { color: 0xe4e1d0, period: 12, strength: .24 }),
+    City_Curb: new THREE.MeshStandardMaterial({
+      name: 'City_Curb', map: curb.base, normalMap: curb.detail,
+      normalScale: new THREE.Vector2(.22, .22), color: 0xffffff,
+      roughness: .94, metalness: 0, side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2
+    })
   };
   const counts = Object.fromEntries(Object.keys(replacements).map(name => [name, 0]));
   city.traverse(mesh => {

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 const BASE = 600, ROAD = 602, WALK = 604.6;
-const HALF = 35, OUTER = 65, CURB = 42;
+const HALF = 35, OUTER = 65, CURB = 36.4;
 const TAU = Math.PI * 2;
 const v2 = (x = 0, y = 0) => new THREE.Vector2(x, y);
 const left = d => v2(-d.y, d.x);
@@ -127,27 +127,39 @@ export function buildRoundedJunctions(mesh) {
     const q = p.clone().applyMatrix4(inverse);
     return q.set(Math.fround(q.x), Math.fround(q.y), Math.fround(q.z));
   };
-  function triangle(index, a, b, c) {
+  function triangle(index, a, b, c, uv = [[0, 0], [0, 0], [0, 0]]) {
     const la = local(a), lb = local(b), lc = local(c);
     const outward = a.clone().add(b).add(c).normalize().applyMatrix3(normalToLocal).normalize();
     const face = lb.clone().sub(la).cross(lc.clone().sub(la));
     if (face.lengthSq() < 1e-18) return;
     const flip = face.dot(outward) < 0;
-    const order = flip ? [la, lc, lb] : [la, lb, lc];
+    const points = [la, lb, lc], order = flip ? [0, 2, 1] : [0, 1, 2];
     // Vertical curb skirts need their actual face normal, not a radial road
     // normal. Quantize first so tiny faces cannot flip after GPU conversion.
     const normal = face.normalize().multiplyScalar(flip ? -1 : 1);
-    for (const p of order) {
+    for (const id of order) {
+      const p = points[id];
       buffers[index].position.push(...p.toArray());
       buffers[index].normal.push(...normal.toArray());
-      buffers[index].uv.push(0, 0);
+      buffers[index].uv.push(...uv[id]);
     }
   }
-  const quad = (index, a, b, c, d) => { triangle(index, a, b, c); triangle(index, a, c, d); };
+  const quad = (index, a, b, c, d, u0 = 0, u1 = 1) => {
+    // Follow the curb, including bends, instead of projecting joints on world axes.
+    const v = index === curbIndex ? a.distanceTo(d) / 4 : 0;
+    const uv = index === curbIndex ? [[u0, 0], [u1, 0], [u1, v], [u0, v]] : [[0, 0], [0, 0], [0, 0], [0, 0]];
+    triangle(index, a, b, c, uv.slice(0, 3));
+    triangle(index, a, c, d, [uv[0], uv[2], uv[3]]);
+  };
   function ribbon(j, pathA, pathB, radiusA, radiusB, index) {
+    const lengths = pathA.slice(1).map((p, k) => world(j, p, WALK).distanceTo(world(j, pathA[k], WALK)));
+    const total = lengths.reduce((a, b) => a + b, 0);
+    const repeats = Math.max(1, Math.round(total / 4));
+    let along = 0;
     for (let k = 0; k < pathA.length - 1; k++) {
       quad(index, world(j, pathA[k], radiusA), world(j, pathA[k + 1], radiusA),
-        world(j, pathB[k + 1], radiusB), world(j, pathB[k], radiusB));
+        world(j, pathB[k + 1], radiusB), world(j, pathB[k], radiusB), along / total * repeats, (along + lengths[k]) / total * repeats);
+      along += lengths[k];
     }
   }
   function fillTriangle(j, a, b, c, depth = 0) {
@@ -194,14 +206,16 @@ export function buildRoundedJunctions(mesh) {
         .addScaledVector(arm.direction, Math.sin(s) * BASE).addScaledVector(side, width).normalize().multiplyScalar(radius);
     }
     const count = Math.ceil((end - start) * BASE / 8);
+    const curbRepeats = Math.max(1, Math.round((end - start) * WALK / 4));
     for (let k = 0; k < count; k++) {
       const a = start + (end - start) * k / count, b = start + (end - start) * (k + 1) / count;
       for (let w = -HALF; w < HALF; w += 10) quad(roadIndex, at(a, w, ROAD), at(b, w, ROAD), at(b, w + 10, ROAD), at(a, w + 10, ROAD));
       for (const sign of [-1, 1]) {
         quad(walkIndex, at(a, sign * HALF, WALK), at(b, sign * HALF, WALK), at(b, sign * OUTER, WALK), at(a, sign * OUTER, WALK));
-        quad(curbIndex, at(a, sign * HALF, ROAD), at(b, sign * HALF, ROAD), at(b, sign * HALF, WALK), at(a, sign * HALF, WALK));
-        quad(curbIndex, at(a, sign * HALF, WALK + .02), at(b, sign * HALF, WALK + .02), at(b, sign * CURB, WALK + .02), at(a, sign * CURB, WALK + .02));
-        quad(curbIndex, at(a, sign * OUTER, WALK), at(b, sign * OUTER, WALK), at(b, sign * OUTER, 600), at(a, sign * OUTER, 600));
+        const u0 = k / count * curbRepeats, u1 = (k + 1) / count * curbRepeats;
+        quad(curbIndex, at(a, sign * HALF, ROAD), at(b, sign * HALF, ROAD), at(b, sign * HALF, WALK), at(a, sign * HALF, WALK), u0, u1);
+        quad(curbIndex, at(a, sign * HALF, WALK + .02), at(b, sign * HALF, WALK + .02), at(b, sign * CURB, WALK + .02), at(a, sign * CURB, WALK + .02), u0, u1);
+        quad(curbIndex, at(a, sign * OUTER, WALK), at(b, sign * OUTER, WALK), at(b, sign * OUTER, 600), at(a, sign * OUTER, 600), u0, u1);
       }
     }
     corridors.push({ j, other, arm, reverse, start, end, side });

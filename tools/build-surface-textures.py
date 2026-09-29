@@ -67,8 +67,17 @@ grain=periodic_noise(.6)
 value=185+slabs+grain*1.6-(1-joint)*26-(1-bevel)*5
 save_base(np.dstack([value+5,value+3,value-1]),'pavers')
 save_detail(normal_from_height(bevel*1.4+grain*.05,.65),np.clip(.91+(1-joint)*.07+grain*.008,.8,1),'pavers')
+# One cool gray stone per repeat. Vertical joints wrap across top and curb face.
+grain=periodic_noise(.8)
+cloud=periodic_noise(12)
+edge=np.minimum(x,N-1-x).astype(float)
+joint=np.clip(edge/3,0,1)
+bevel=np.clip(edge/8,0,1)
+value=167+grain*3+cloud*3-(1-joint)*43-(1-bevel)*7
+save_base(np.dstack([value+2,value+2,value]),'curb-v1')
+save_detail(normal_from_height(bevel*1.5+grain*.09,.55),np.clip(.94+grain*.01,.85,1),'curb-v1')
 report={"resolution":[512,512],"grassSourceFiles":[args.grass_base,args.grass_normal,args.grass_roughness],"detailChannels":"RGB: normalized tangent normal; A: roughness (linear)","textures":[]}
-for f in sorted(out/(kind+'-'+channel+'-512.webp') for kind in [args.grass_name,'asphalt','pavers'] for channel in ['base','detail']):
+for f in sorted(out/(kind+'-'+channel+'-512.webp') for kind in [args.grass_name,'asphalt','pavers','curb-v1'] for channel in ['base','detail']):
     im=Image.open(f)
     assert im.size==(512,512)
     report['textures'].append({'file':f.name,'size':list(im.size),'bytes':f.stat().st_size})

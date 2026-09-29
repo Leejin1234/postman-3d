@@ -27,6 +27,22 @@
       "bytes": 586892
     },
     {
+      "file": "curb-v1-base-512.webp",
+      "size": [
+        512,
+        512
+      ],
+      "bytes": 16884
+    },
+    {
+      "file": "curb-v1-detail-512.webp",
+      "size": [
+        512,
+        512
+      ],
+      "bytes": 328530
+    },
+    {
       "file": "grass-v2-base-512.webp",
       "size": [
         512,
@@ -59,5 +75,5 @@
       "bytes": 353852
     }
   ],
-  "totalBytes": 1164164
+  "totalBytes": 1509578
 }

@@ -194,6 +194,7 @@
   "corners": 30,
   "corridors": 15,
   "triangles": 88399,
+  "junctionCount": 10,
   "paint": {
     "sourceTriangles": 8674,
     "triangles": 76941,
@@ -202,6 +203,5 @@
   },
   "vertices": 469998,
   "bytes": 15040000,
-  "junctionCount": 10,
-  "compressedBytes": 2825344
+  "compressedBytes": 2896197
 }
