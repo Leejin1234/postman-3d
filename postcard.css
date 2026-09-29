@@ -139,3 +139,71 @@ button:focus-visible,[role=button]:focus-visible { outline:2px solid #557b68; ou
   .intro-footnote { bottom:18px; left:auto; right:24px; }
 }
 @media (prefers-reduced-motion:reduce) { * { transition:none !important; } }
+
+/* Touch controls use CSS pixels, independently of the WebGL render resolution. */
+.stick { width:128px; height:128px; visibility:hidden; pointer-events:none; z-index:3; }
+.stick.active { visibility:visible; }
+.stick i { width:54px; height:54px; margin:-27px 0 0 -27px; }
+.mobile-ui .topbar { top:max(10px,env(safe-area-inset-top)); left:max(12px,env(safe-area-inset-left)); right:max(12px,env(safe-area-inset-right)); gap:6px; }
+.mobile-ui .avatar { width:48px; height:48px; }
+.mobile-ui .pname { font-size:17px; letter-spacing:1px; }
+.mobile-ui .res { font-size:14px; min-height:40px; padding:5px 8px; gap:4px; }
+.mobile-ui .res .plus { display:none; }
+.mobile-ui .gear { width:44px; height:44px; font-size:20px; }
+.mobile-ui .tasktxt b { font-size:15px; letter-spacing:0; }
+.mobile-ui .tasktxt span { font-size:12px; }
+.mobile-ui .bbtn,.mobile-ui .bbtn.img { width:86px; height:48px; padding:0 6px; }
+.mobile-ui .bbtn span,.mobile-ui .bbtn.img span { font-size:14px; }
+.mobile-ui .view-controls button { min-height:44px; font-size:14px; padding:8px 12px; }
+.mobile-ui #btnQuiet { min-height:44px; font-size:12px; padding:8px 14px; }
+.mobile-ui .gas,.mobile-ui .gas.img { width:84px; height:84px; font-size:17px; right:max(14px,env(safe-area-inset-right)); }
+.mobile-ui .brake,.mobile-ui .brake.img { width:66px; height:66px; font-size:16px; right:112px; }
+.mobile-ui #btnRide { width:72px; height:48px; font-size:16px; right:20px; }
+.mobile-ui .panel { max-height:85%; overflow:auto; padding:18px; touch-action:pan-y; }
+.mobile-ui .panel h3 { font-size:20px; margin-bottom:12px; }
+.mobile-ui .panel .cell { font-size:14px; }
+.mobile-ui .panel .close { min-height:48px; font-size:16px; }
+.mobile-ui #start button { min-height:52px; font-size:17px; }
+.mobile-ui #start .intro-help { font-size:13px; }
+.mobile-ui .hint { display:none; }
+@media (orientation:portrait) {
+  .mobile-ui .bottom { bottom:calc(52px + env(safe-area-inset-bottom)); padding:5px 8px; }
+  .mobile-ui #btnQuiet { bottom:calc(4px + env(safe-area-inset-bottom)); }
+  .mobile-ui .gas,.mobile-ui .gas.img { bottom:calc(125px + env(safe-area-inset-bottom)); }
+  .mobile-ui .brake,.mobile-ui .brake.img { bottom:calc(134px + env(safe-area-inset-bottom)); }
+  .mobile-ui #btnRide { bottom:calc(222px + env(safe-area-inset-bottom)); }
+  .mobile-ui .view-controls { top:auto; bottom:calc(286px + env(safe-area-inset-bottom)); }
+  .mobile-ui .speed { bottom:calc(228px + env(safe-area-inset-bottom)); left:20px; }
+  .mobile-ui .taskbar { top:88px; left:12px; max-width:calc(100% - 118px); }
+  .mobile-ui #mini { right:12px; top:88px; }
+  .mobile-ui .compass { right:12px; top:178px; }
+}
+@media (orientation:landscape) {
+  .mobile-ui .panel .cell { aspect-ratio:auto; min-height:64px; }
+  .mobile-ui .avatar { width:40px; height:40px; }
+  .mobile-ui .edition { display:none; }
+  .mobile-ui .view-controls { top:max(8px,env(safe-area-inset-top)); padding:2px; }
+  .mobile-ui .bottom { bottom:calc(8px + env(safe-area-inset-bottom)); padding:4px 6px; }
+  .mobile-ui #btnQuiet { bottom:calc(68px + env(safe-area-inset-bottom)); }
+  .mobile-ui .gas,.mobile-ui .gas.img { bottom:calc(14px + env(safe-area-inset-bottom)); }
+  .mobile-ui .brake,.mobile-ui .brake.img { bottom:calc(23px + env(safe-area-inset-bottom)); }
+  .mobile-ui #btnRide { bottom:calc(110px + env(safe-area-inset-bottom)); }
+  .mobile-ui .speed { bottom:115px; right:112px; }
+  .mobile-ui .taskbar { top:66px; left:12px; max-width:36%; }
+  .mobile-ui #mini { top:66px; right:12px; width:76px; height:76px; }
+  .mobile-ui .compass { top:148px; right:12px; width:76px; }
+}
+@media (orientation:landscape) and (max-width:700px) {
+  .mobile-ui .view-controls { top:65px; }
+  .mobile-ui .bottom { left:43%; }
+  .mobile-ui .bbtn,.mobile-ui .bbtn.img { width:68px; }
+  .mobile-ui .bbtn em { display:none; }
+  .mobile-ui #btnQuiet { left:43%; }
+}
+@media (max-width:360px) {
+  .mobile-ui .avatar { width:40px; height:40px; }
+  .mobile-ui .pname { font-size:15px; }
+  .mobile-ui .edition { display:none; }
+  .mobile-ui .lvbar { width:60px; }
+  .mobile-ui .res { padding:4px 6px; }
+}

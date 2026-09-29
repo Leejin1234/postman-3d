@@ -4,7 +4,7 @@ import { mergeGeometries } from './vendor/utils/BufferGeometryUtils.js';
 const hash = name => { let h = 2166136261; for (const ch of name) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return h >>> 0; };
 
 // Original geometry, inspired by Polygon Runway's forked trunks and pointed leaf crowns.
-export function buildStylizedTree(seed = 1) {
+export function buildStylizedTree(seed = 1, stride = 1) {
   const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
   const parts = [], leafPositions = [], leafNormals = [], leafColors = [];
   const bark = new T.Color('#70402b'), barkLight = new T.Color('#9a5736');
@@ -41,9 +41,10 @@ export function buildStylizedTree(seed = 1) {
       bitangent.normalize(); tangent.crossVectors(bitangent, normal).normalize();
       tangent.applyAxisAngle(normal, random() * Math.PI * 2);
       bitangent.crossVectors(normal,tangent).normalize();
-      const length = .062 + random() * .045, width = length * (.40 + random() * .20);
+      const length = (.062 + random() * .045) * Math.sqrt(stride), width = length * (.40 + random() * .20);
       const tint = T.MathUtils.clamp((center.y - .50) / .52 + (random() - .5) * .24, 0, 1);
       const color = tint < .5 ? dark.clone().lerp(mid, tint * 2) : mid.clone().lerp(light, (tint - .5) * 2);
+      if (i % stride !== 0) continue;
       // Folded pointed leaf: the ridge catches light without a texture or alpha overdraw.
       const shape = [[0,-length,0],[-width,0,0],[0,length,0],[width,0,0],[0,0,.013]];
       for (const index of [0,1,4,1,2,4,2,3,4,3,0,4]) {
@@ -66,10 +67,11 @@ export function buildStylizedTree(seed = 1) {
   return { geometry, trunk };
 }
 
-export function replaceStylizedTrees(city) {
+export function replaceStylizedTrees(city, { mobile = false } = {}) {
   city.updateMatrixWorld(true);
   const trees = []; city.traverse(o => { if (o.isMesh && /^Tree_/.test(o.name)) trees.push(o); });
-  const variants = Array.from({length:6}, (_, i) => buildStylizedTree(817 + i * 397));
+  const variants = Array.from({length:6}, (_, i) => buildStylizedTree(817 + i * 397, mobile ? 2 : 1));
+  const distant = Array.from({length:6}, (_, i) => buildStylizedTree(817 + i * 397, 4));
   const profiles = new Map();
   const material = new T.MeshLambertMaterial({ vertexColors:true, side:T.DoubleSide });
   material.name = 'StylizedTree';
@@ -98,9 +100,9 @@ export function replaceStylizedTrees(city) {
     const ratio = Math.min(1, Math.max(.3,oldTrunkRadius) / (.049 * width));
     const trunkScale = Math.max(.1,Math.floor(ratio * 10)/10), profileKey = `${id % variants.length}:${trunkScale}`;
     if (!profiles.has(profileKey)) {
-      const geo = variant.geometry.clone(), trunk = variant.trunk.clone();
+      const geo = variant.geometry.clone(), trunk = variant.trunk.clone(), far = distant[id % variants.length].geometry.clone();
       const trunkVertexCount = trunk.attributes.position.count;
-      for (const g of [geo,trunk]) {
+      for (const g of [geo,trunk,far]) {
         const p = g.attributes.position;
         for (let i=0;i<Math.min(p.count,trunkVertexCount);i++) {
           const blend = 1 - T.MathUtils.smoothstep(p.getY(i),0,.25);
@@ -108,7 +110,7 @@ export function replaceStylizedTrees(city) {
         }
         g.computeBoundingBox(); g.computeBoundingSphere();
       }
-      profiles.set(profileKey,{geometry:geo,trunk});
+      profiles.set(profileKey,{geometry:geo,trunk,far});
     }
     pivot.addScaledVector(up,bottom-pivot.dot(up)-.12);
     q.setFromUnitVectors(axis,up).multiply(yaw.setFromAxisAngle(axis,(id%6283)/1000));
@@ -120,8 +122,9 @@ export function replaceStylizedTrees(city) {
     tree.geometry=profiles.get(profileKey).geometry; tree.material=material;
     tree.userData.collisionGeometry=profiles.get(profileKey).trunk;
     tree.userData.stylizedTree=true;
+    tree.userData.treeLod={near:tree.geometry,far:profiles.get(profileKey).far};
   }
-  for(const variant of variants){variant.geometry.dispose();variant.trunk.dispose();}
+  for(const variant of [...variants,...distant]){variant.geometry.dispose();variant.trunk.dispose();}
   city.updateMatrixWorld(true);
   return { trees:trees.length,oldTriangles,triangles:trees.reduce((n,t)=>n+t.geometry.attributes.position.count/3,0),variants:6,sharedGeometries:profiles.size };
 }

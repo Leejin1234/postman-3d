@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {buildStylizedTree} from '../stylized-trees.js';
+const counts=[];
+for(const stride of [1,2,4]){
+ const {geometry,trunk}=buildStylizedTree(817,stride);
+ counts.push(geometry.attributes.position.count/3);
+ assert.equal(trunk.attributes.position.count/3,168,'LOD must not change collision trunk');
+ assert.ok(geometry.boundingBox.max.y>1&&geometry.boundingBox.max.y<1.4,'Retain crown coverage');
+ for(const a of Object.values(geometry.attributes))assert.ok(a.array.every(Number.isFinite));
+}
+assert.ok(counts[1]<counts[0]*.6&&counts[2]<counts[0]*.35);
+console.log(JSON.stringify({result:'PASS',desktopNear:counts[0],mobileNear:counts[1],far:counts[2],farTriangleReduction:1-counts[2]/counts[0]},null,2));

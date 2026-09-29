@@ -10,7 +10,8 @@ import { createCollisionWorld, sweepSphere } from './collision-world.js?v=202609
 import { installSurfaceMaterials } from './surface-materials.js?v=20260929-11';
 import { installSoftTerrain, smoothTerrainNormals } from './soft-terrain.js?v=20260929-11';
 import { scatterMeadow, createMeadowPlants } from './meadow-plants.js?v=20260929-14';
-import { replaceStylizedTrees } from './stylized-trees.js?v=20260929-15';
+import { replaceStylizedTrees } from './stylized-trees.js?v=20260929-16';
+import { installFloatingStick } from './floating-stick.js?v=20260929-16';
 
 let meadowPlants = null;
 
@@ -21,6 +22,7 @@ const IS_MOBILE = /(\?|&)pc(&|$)/.test(location.search) ? false
   : /Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(navigator.userAgent) ||
   (navigator.maxTouchPoints > 1 && Math.min(screen.width, screen.height) < 900);
 const DEBUG = /(\?|&)debug/.test(location.search);
+document.body.classList.toggle('mobile-ui', IS_MOBILE);
 const AUTO = /(\?|&)auto/.test(location.search);
 const SELFTEST = /(\?|&)selftest/.test(location.search);
 
@@ -48,13 +50,13 @@ const CFG = {
   footRadius: 0.42 * S,
   mountRange: 3.4 * S,
   bikeRadius: 0.7 * S,          // 电动车的碰撞半径
-  shadowSize: IS_MOBILE ? 1024 : 2048,
+  shadowSize: IS_MOBILE ? 512 : 2048,
   shadowSpan: (IS_MOBILE ? 38 : 52) * S,
   /* 雾要淡、要远：近端往外推，远处的楼才不会一上来就被刷白。
      但远端必须压在 VIEW_ARC 之内（雾把剔除那一下跳变盖住），
      所以放雾必须连着放 VIEW_ARC，两个值一起改。 */
   fog: IS_MOBILE ? [180, 440] : [240, 570],
-  maxDpr: IS_MOBILE ? 1.6 : 2
+  maxDpr: IS_MOBILE ? 1.25 : 1.75
 };
 
 const $ = id => document.getElementById(id);
@@ -1249,6 +1251,13 @@ function horizonCull(q) {
     const dot = e.d.dot(_hzU);
     const v = dot >= Math.cos(Math.min(eyeAngle + e.topAngle + 0.05, maxAngle));
     e.o.visible = v;
+    if (v && e.o.userData.treeLod) {
+      const lod = e.o.userData.treeLod;
+      _hzP.setFromMatrixPosition(e.o.matrixWorld);
+      const distance = _hzP.distanceToSquared(camera.position), limit = IS_MOBILE ? 105 : 175;
+      const threshold = e.o.geometry === lod.far ? limit - 12 : limit + 12;
+      e.o.geometry = distance > threshold * threshold ? lod.far : lod.near;
+    }
     e.o.castShadow = e.castsShadow && e.d.dot(_hzFocus) > shadowLimit;
     if (e.shell) e.shell.visible = v && dot >= e.limS;
     if (v) on++;
@@ -1657,8 +1666,9 @@ addEventListener('keydown', e => { keys[e.code] = true; });
 addEventListener('keyup', e => { keys[e.code] = false; });
 
 $('hint').textContent = IS_MOBILE
-  ? '摇杆转向 · 油门/刹车 · 「下车」步行'
+  ? '左侧空白处按住拖动 · 油门/刹车 · 下车步行'
   : 'W/S 油门刹车 · A/D 转向 · F 上下车 · 步行时 Shift 跑 / 空格跳';
+if (IS_MOBILE) document.querySelector('.intro-help').textContent = '左侧空白处按住拖动 · 右侧油门与刹车 · 下车步行';
 addEventListener('touchmove', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
 addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('contextmenu', e => e.preventDefault());
@@ -1667,39 +1677,21 @@ addEventListener('orientationchange', () => setTimeout(resize, 250));
 document.addEventListener('visibilitychange', () => { if (!document.hidden) clock.getDelta(); });
 
 const stick = $('stick'), knob = $('knob');
-let stickId = null;
-const stickVec = { x: 0, y: 0 };
-function stickMove(t) {
-  const r = stick.getBoundingClientRect();
-  const dx = t.clientX - (r.left + r.width / 2), dy = t.clientY - (r.top + r.height / 2);
-  const max = r.width / 2, len = Math.hypot(dx, dy) || 1;
-  const k = Math.min(1, max / len);
-  stickVec.x = dx * k / max;
-  stickVec.y = dy * k / max;
-  knob.style.transform = `translate(${dx * k}px,${dy * k}px)`;
-}
-function stickEnd() { stickId = null; stickVec.x = stickVec.y = 0; knob.style.transform = 'translate(0,0)'; }
-stick.addEventListener('touchstart', e => { stickId = e.changedTouches[0].identifier; stickMove(e.changedTouches[0]); e.preventDefault(); }, { passive: false });
-stick.addEventListener('touchmove', e => {
-  for (const t of e.changedTouches) if (t.identifier === stickId) stickMove(t);
-  e.preventDefault();
-}, { passive: false });
-stick.addEventListener('touchend', stickEnd);
-stick.addEventListener('touchcancel', stickEnd);
-stick.addEventListener('mousedown', e => { stickId = 'm'; stickMove(e); });
-addEventListener('mousemove', e => { if (stickId === 'm') stickMove(e); });
-addEventListener('mouseup', () => { if (stickId === 'm') stickEnd(); });
+const joystick = installFloatingStick({stage:$('stage'),canvas,stick,knob,
+  enabled:() => !introPreview && !$('mask').classList.contains('on') && !document.body.classList.contains('quiet')});
+const stickVec = joystick.vector;
 
 let gasOn = false, brakeOn = false, jumpQueued = false;
 function hold(el, set) {
-  const on = e => { set(true); e.preventDefault(); };
-  const off = () => set(false);
-  el.addEventListener('touchstart', on, { passive: false });
-  el.addEventListener('touchend', off);
-  el.addEventListener('touchcancel', off);
-  el.addEventListener('mousedown', on);
-  el.addEventListener('mouseup', off);
-  el.addEventListener('mouseleave', off);
+  let pointer = null;
+  const off = () => { const old = pointer; pointer = null; set(false); if (old !== null && el.hasPointerCapture(old)) el.releasePointerCapture(old); };
+  el.addEventListener('pointerdown', e => {
+    if (pointer !== null || e.button !== 0) return;
+    pointer = e.pointerId; el.setPointerCapture(pointer); set(true); e.preventDefault();
+  });
+  for (const type of ['pointerup','pointercancel','lostpointercapture']) el.addEventListener(type,e => { if (e.pointerId === pointer) off(); });
+  addEventListener('blur',off);
+  document.addEventListener('visibilitychange',() => { if (document.hidden) off(); });
 }
 hold($('gas'), v => gasOn = v);
 hold($('brake'), v => {
@@ -1718,6 +1710,7 @@ const PANELS = {
   shop: ['🛒 商店', [['🛵', '车辆改装'], ['⚡', '电量+'], ['🎽', '皮肤'], ['🧰', '扩容'], ['🔔', '喇叭'], ['💡', '车灯']]]
 };
 document.querySelectorAll('.bbtn').forEach(b => b.addEventListener('click', () => {
+  joystick.reset();
   const [title, cells] = PANELS[b.dataset.panel];
   $('pTitle').textContent = title;
   $('pList').innerHTML = cells.map(([e, t]) => `<div class="cell"><em>${e}</em>${t}</div>`).join('');
@@ -1742,8 +1735,9 @@ function toggleLight() {
 }
 $('btnView').onclick = toggleView;
 $('btnLight').onclick = toggleLight;
-$('btnGear').onclick = () => toast('V 切换远眺 · H 收起界面 · 晴日 / 黄昏可切换');
+$('btnGear').onclick = () => toast(IS_MOBILE ? '左侧空白处拖动移动 · 右侧油门/刹车 · 下车步行' : 'V 切换远眺 · H 收起界面 · 晴日 / 黄昏可切换');
 $('btnQuiet').onclick = () => {
+  joystick.reset();
   const quiet = document.body.classList.toggle('quiet');
   $('btnQuiet').textContent = quiet ? '显示界面' : '收起界面';
   $('btnQuiet').setAttribute('aria-pressed', String(quiet));
@@ -2227,7 +2221,7 @@ function loop() {
       Object.keys(carWhy).map(k => k + ':' + carWhy[k]).join(' ') + ` 重投=${state.carResp || 0}` +
       ` 里程=${(state.odo || 0).toFixed(0)}m/${time.toFixed(0)}s`;
   }
-  drawMini();
+  if (time - (state.miniTime || 0) > .10) { drawMini(); state.miniTime = time; }
   renderer.render(scene, camera);
 }
 
@@ -2307,7 +2301,7 @@ async function boot() {
   if (DEBUG) console.info('Scene density:', density);
   const grassLevel = raiseGrassLevel(city);
   if (DEBUG) console.info('Grass level:', grassLevel);
-  const trees = replaceStylizedTrees(city);
+  const trees = replaceStylizedTrees(city, { mobile: IS_MOBILE });
   if (DEBUG) console.info('Stylized trees:', trees);
   const terrainNormals = smoothTerrainNormals(city);
   if (DEBUG) console.info('Soft terrain:', terrainNormals);
