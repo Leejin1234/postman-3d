@@ -1,5 +1,50 @@
 import * as T from 'three';
 
+export function addMossCoordinates(geometry,upAxis='z'){
+  geometry.computeBoundingBox();
+  const positions=geometry.attributes.position,normals=geometry.attributes.normal;
+  const size=geometry.boundingBox.getSize(new T.Vector3()),min=geometry.boundingBox.min,coords=[],up=[];
+  for(let i=0;i<positions.count;i++){
+    const x=(positions.getX(i)-min.x)/(size.x||1),y=(positions.getY(i)-min.y)/(size.y||1),z=(positions.getZ(i)-min.z)/(size.z||1);
+    coords.push(x,upAxis==='y'?z:y,upAxis==='y'?y:z);
+    up.push(upAxis==='y'?normals.getY(i):normals.getZ(i));
+  }
+  geometry.setAttribute('mossPosition',new T.Float32BufferAttribute(coords,3));
+  geometry.setAttribute('mossUp',new T.Float32BufferAttribute(up,1));
+  return geometry;
+}
+
+export function createMossRockMaterial(){
+  const material=new T.MeshLambertMaterial({color:'#92998a'});
+  material.name='RoundedStone';
+  material.onBeforeCompile=shader=>{
+    shader.vertexShader='attribute vec3 mossPosition;\nattribute float mossUp;\nvarying vec3 vMossPosition;\nvarying float vMossUp;\n'+shader.vertexShader;
+    shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvMossPosition=mossPosition;vMossUp=mossUp;');
+    shader.fragmentShader=`varying vec3 vMossPosition;
+      varying float vMossUp;
+      float mossHash(vec3 p){p=fract(p*.1031);p+=dot(p,p.yzx+33.33);return fract((p.x+p.y)*p.z);}
+      float mossNoise(vec3 p){
+        vec3 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
+        return mix(mix(mix(mossHash(i),mossHash(i+vec3(1,0,0)),f.x),mix(mossHash(i+vec3(0,1,0)),mossHash(i+vec3(1,1,0)),f.x),f.y),
+          mix(mix(mossHash(i+vec3(0,0,1)),mossHash(i+vec3(1,0,1)),f.x),mix(mossHash(i+vec3(0,1,1)),mossHash(i+vec3(1,1,1)),f.x),f.y),f.z);
+      }
+    `+shader.fragmentShader;
+    shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>',`#include <color_fragment>
+      vec3 p=vMossPosition;
+      float patches=mossNoise(p*4.8)+.28*mossNoise(p*13.0);
+      float grain=mossNoise(p*85.0);
+      float upward=smoothstep(.05,.8,vMossUp);
+      float coverage=smoothstep(.52,.69,patches+upward*.28);
+      coverage*=smoothstep(.15,.50,p.z)*smoothstep(-.25,.38,vMossUp);
+      vec3 moss=mix(vec3(.072,.135,.036),vec3(.25,.34,.092),grain);
+      diffuseColor.rgb*=.86+.22*grain;
+      diffuseColor.rgb=mix(diffuseColor.rgb,moss,coverage*.92);
+    `);
+  };
+  material.customProgramCacheKey=()=> 'rounded-moss-v1';
+  return material;
+}
+
 function closedHull(points) {
   const a=0,b=points.reduce((best,p,i)=>p.distanceToSquared(points[a])>points[best].distanceToSquared(points[a])?i:best,1);
   const axis=points[b].clone().sub(points[a]),cross=new T.Vector3();
@@ -68,11 +113,12 @@ export function roundRockGeometry(source) {
   const geometry=new T.BufferGeometry();
   geometry.setAttribute('position',new T.Float32BufferAttribute(positions.flatMap(p=>p.toArray()),3));
   geometry.setIndex(faces.flat());geometry.computeVertexNormals();geometry.computeBoundingBox();geometry.computeBoundingSphere();
-  return geometry;
+  // FBX stones use local Z as up. Bake coordinates before any preview rotations.
+  return addMossCoordinates(geometry);
 }
 
 export function roundSceneRocks(city){
-  const cache=new Map(),material=new T.MeshLambertMaterial({color:'#92998a'});
+  const cache=new Map(),material=createMossRockMaterial();
   material.name='RoundedStone';let rocks=0,triangles=0;
   city.traverse(o=>{
     if(!o.isMesh||!/^Rock_/.test(o.name))return;

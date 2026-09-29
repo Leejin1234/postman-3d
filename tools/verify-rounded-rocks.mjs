@@ -16,6 +16,9 @@ city.traverse(o=>{
  assert.ok(box.min.x>=before.box.min.x-1e-6&&box.max.x<=before.box.max.x+1e-6);
  assert.ok(box.min.y>=before.box.min.y-1e-6&&box.max.y<=before.box.max.y+1e-6);
  const g=o.geometry,edges=new Map();
+ assert.equal(g.attributes.mossPosition.count,g.attributes.position.count);
+ assert.ok(g.attributes.mossPosition.array.every(v=>Number.isFinite(v)&&v>=0&&v<=1),'Moss coordinates stay on the stone');
+ assert.ok(g.attributes.mossUp.array.some(v=>v>.5)&&g.attributes.mossUp.array.some(v=>v<-.5),'Moss distinguishes top and underside');
  for(let i=0;i<g.index.count;i+=3)for(let k=0;k<3;k++){const a=g.index.getX(i+k),b=g.index.getX(i+(k+1)%3),key=[a,b].sort((a,b)=>a-b).join(':');edges.set(key,(edges.get(key)||0)+1);}
  assert.ok([...edges.values()].every(n=>n===2),'Rocks must remain closed');
  const normal=new T.Vector3();for(let i=0;i<g.attributes.normal.count;i++)assert.ok(Math.abs(normal.fromBufferAttribute(g.attributes.normal,i).length()-1)<1e-5);

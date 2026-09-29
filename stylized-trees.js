@@ -3,27 +3,40 @@ import { mergeGeometries } from './vendor/utils/BufferGeometryUtils.js';
 
 const hash = name => { let h = 2166136261; for (const ch of name) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return h >>> 0; };
 
-// Analytic disks keep a genuinely circular silhouette with only two triangles.
-function circularLeaves(material) {
+const leafMasks=[];
+function getLeafMask(index) {
+  if (!leafMasks[index]) {
+    leafMasks[index] = typeof document === 'undefined' ? new T.Texture() : new T.TextureLoader().load(new URL(`./assets/trees/rei-leaves-${index?'b':'a'}-512.png`,import.meta.url).href);
+    leafMasks[index].colorSpace = T.NoColorSpace;
+  }
+  return leafMasks[index];
+}
+
+// Rei's rounded leaf-cluster mask is shared by the visible and shadow passes.
+function reiLeaves(material) {
   material.onBeforeCompile = shader => {
+    shader.uniforms.reiLeafMaskA = {value:getLeafMask(0)};
+    shader.uniforms.reiLeafMaskB = {value:getLeafMask(1)};
     shader.vertexShader = 'varying vec2 leafDiskUv;\n' + shader.vertexShader;
     shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nleafDiskUv = uv;');
-    shader.fragmentShader = 'varying vec2 leafDiskUv;\n' + shader.fragmentShader;
+    shader.fragmentShader = 'uniform sampler2D reiLeafMaskA;\nuniform sampler2D reiLeafMaskB;\nvarying vec2 leafDiskUv;\n' + shader.fragmentShader;
     shader.fragmentShader = shader.fragmentShader.replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
       if (leafDiskUv.x >= 0.0) {
-        vec2 disk = leafDiskUv * 2.0 - 1.0;
-        if (dot(disk, disk) > 1.0) discard;
+        float mask=leafDiskUv.x>1.5 ? texture2D(reiLeafMaskB,leafDiskUv-vec2(2.0,0.0)).r : texture2D(reiLeafMaskA,leafDiskUv).r;
+        if (mask < 0.48) discard;
       }`);
+    // Leaf cards inherit the crown normal on both sides, avoiding dark back-face rims.
+    shader.fragmentShader=shader.fragmentShader.replace('#include <normal_fragment_begin>',T.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;','normal *= leafDiskUv.x > -1.5 ? 1.0 : faceDirection;'));
   };
-  material.customProgramCacheKey = () => 'circular-tree-leaves-v1';
+  material.customProgramCacheKey = () => 'rei-two-leaf-masks-v2';
   return material;
 }
 
 export function createTreeMaterial() {
-  return circularLeaves(new T.MeshLambertMaterial({vertexColors:true,side:T.DoubleSide}));
+  return reiLeaves(new T.MeshLambertMaterial({vertexColors:true,side:T.DoubleSide}));
 }
 
-// Rounded overlapping foliage inspired by brainchildpl's stylized tree tutorial.
+// Rei_treeLeavesGN: a smooth inner crown with outward-facing masked leaf clusters.
 export function buildStylizedTree(seed = 1, stride = 1) {
   const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
   const parts = [], leafPositions = [], leafNormals = [], leafColors = [], leafUvs = [];
@@ -47,12 +60,26 @@ export function buildStylizedTree(seed = 1, stride = 1) {
   branch([-.005, .39, .014], [.17, .55, -.035], .025, .017);
   branch([.17, .54, -.035], [.21, .77, -.015], .017, .006);
   branch([-.045, .48, .02], [-.045, .73, .16], .021, .007);
-  const crowns = [[-.17,.71,0,.23,.23,.23],[.19,.76,-.015,.24,.25,.23],[-.02,.89,.015,.24,.22,.22],[-.03,.75,.18,.22,.20,.20],[.015,.70,-.17,.24,.21,.20]];
-  const dark = new T.Color('#39734b'), mid = new T.Color('#78a653'), light = new T.Color('#bcd783');
+  const crowns = [[-.20,.70,0,.25,.20,.23],[.22,.77,-.015,.25,.22,.24],[-.035,.94,.015,.24,.23,.23],[-.03,.74,.21,.23,.18,.23],[.015,.72,-.20,.24,.19,.23]];
+  const dark = new T.Color('#23735c'), mid = new T.Color('#60a955'), light = new T.Color('#a9cd67');
+  const foliageColor = (y,n) => {
+    const tint=T.MathUtils.clamp((y-.48)/.68*.72+(n+1)*.14,0,1);
+    return tint<.5?dark.clone().lerp(mid,tint*2):mid.clone().lerp(light,(tint-.5)*2);
+  };
+  const cores=[];
   const center = new T.Vector3(), normal = new T.Vector3(), tangent = new T.Vector3(), bitangent = new T.Vector3(), point = new T.Vector3();
   for (const [x,y,z,rx,ry,rz] of crowns) {
-    for (let i = 0; i < 96; i++) {
-      const h = 1 - 2 * (i + .25 + random() * .5) / 96, angle = i * 2.399963 + random() * .3, radial = Math.sqrt(1 - h * h);
+    const core=new T.IcosahedronGeometry(1,0);
+    core.scale(rx*.79,ry*.79,rz*.79);core.translate(x,y,z);
+    const cp=core.attributes.position,cn=core.attributes.normal,cc=[];
+    for(let i=0;i<cp.count;i++){
+      const n=new T.Vector3((cp.getX(i)-x)/rx,(cp.getY(i)-y)/ry+.65,(cp.getZ(i)-z)/rz).normalize();
+      cn.setXYZ(i,n.x,n.y,n.z);cc.push(...foliageColor(cp.getY(i),n.y).toArray());
+    }
+    core.setAttribute('color',new T.Float32BufferAttribute(cc,3));
+    core.setAttribute('uv',new T.Float32BufferAttribute(new Float32Array(cp.count*2).fill(-1),2));cores.push(core);
+    for (let i = 0; i < 80; i++) {
+      const h = 1 - 2 * (i + .25 + random() * .5) / 80, angle = i * 2.399963 + random() * .3, radial = Math.sqrt(1 - h * h);
       normal.set(radial * Math.cos(angle), h, radial * Math.sin(angle));
       const depth = .88 + random() * .12;
       center.set(x + normal.x * rx * depth, y + normal.y * ry * depth, z + normal.z * rz * depth);
@@ -62,20 +89,20 @@ export function buildStylizedTree(seed = 1, stride = 1) {
       bitangent.normalize(); tangent.crossVectors(bitangent, normal).normalize();
       tangent.applyAxisAngle(normal, random() * Math.PI * 2);
       bitangent.crossVectors(normal,tangent).normalize();
-      const radius = (.064 + random() * .022) * Math.sqrt(stride);
+      const radius = (.081 + random() * .025) * Math.sqrt(stride);
       random(); // Preserve all other random choices and placements.
-      const tint = T.MathUtils.clamp((center.y - .50) / .52 + (random() - .5) * .24, 0, 1);
-      const color = tint < .5 ? dark.clone().lerp(mid, tint * 2) : mid.clone().lerp(light, (tint - .5) * 2);
+      const color = foliageColor(center.y+(random()-.5)*.035,normal.y);
+      const maskIndex=random()<.5?0:1;
       if (i % stride !== 0) continue;
       const shape = [[-1,-1],[1,-1],[1,1],[-1,1]];
       for (const index of [0,2,1,0,3,2]) {
         const v = shape[index]; point.copy(center).addScaledVector(tangent,v[1]*radius).addScaledVector(bitangent,v[0]*radius);
         leafPositions.push(point.x,point.y,point.z);
-        leafUvs.push((v[0]+1)*.5,(v[1]+1)*.5);
+        leafUvs.push((v[0]+1)*.5+maskIndex*2,(v[1]+1)*.5);
         // Use crown normals for cohesive soft foliage lighting.
-        const ny = normal.y * .6 + .4, nl = Math.hypot(normal.x,ny,normal.z);
-        leafNormals.push(normal.x/nl,ny/nl,normal.z/nl);
-        const shade = 1;
+        const nx=normal.x*.65,ny=normal.y*.40+.65,nz=normal.z*.65,nl=Math.hypot(nx,ny,nz);
+        leafNormals.push(nx/nl,ny/nl,nz/nl);
+        const shade = 1 + v[1]*.025;
         leafColors.push(color.r * shade,color.g * shade,color.b * shade);
       }
     }
@@ -85,8 +112,9 @@ export function buildStylizedTree(seed = 1, stride = 1) {
   leaves.setAttribute('normal',new T.Float32BufferAttribute(leafNormals,3));
   leaves.setAttribute('color',new T.Float32BufferAttribute(leafColors,3));
   leaves.setAttribute('uv',new T.Float32BufferAttribute(leafUvs,2));
-  const trunk = mergeGeometries(parts, false), geometry = mergeGeometries([trunk,leaves], false);
-  for (const part of [...parts,leaves]) part.dispose();
+  const trunk = mergeGeometries(parts, false), geometry = mergeGeometries([trunk,...cores,leaves], false);
+  geometry.userData.coreTriangles=cores.reduce((n,g)=>n+g.attributes.position.count/3,0);
+  for (const part of [...parts,...cores,leaves]) part.dispose();
   geometry.computeBoundingBox(); geometry.computeBoundingSphere();
   return { geometry, trunk };
 }
@@ -98,7 +126,7 @@ export function replaceStylizedTrees(city, { mobile = false } = {}) {
   const distant = Array.from({length:6}, (_, i) => buildStylizedTree(817 + i * 397, 4));
   const profiles = new Map();
   const material = createTreeMaterial();
-  const depthMaterial = circularLeaves(new T.MeshDepthMaterial({depthPacking:T.RGBADepthPacking,side:T.DoubleSide}));
+  const depthMaterial = reiLeaves(new T.MeshDepthMaterial({depthPacking:T.RGBADepthPacking,side:T.DoubleSide}));
   material.name = 'StylizedTree';
   const point = new T.Vector3(), pivot = new T.Vector3(), up = new T.Vector3(), local = new T.Vector3();
   const axis = new T.Vector3(0,1,0), q = new T.Quaternion(), yaw = new T.Quaternion(), scale = new T.Vector3();
