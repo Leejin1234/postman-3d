@@ -32,7 +32,7 @@ export function buildFootprint(mesh, center = new THREE.Vector3()) {
   const east = new THREE.Vector3(Math.abs(up.y) < .9 ? 0 : 1, Math.abs(up.y) < .9 ? 1 : 0, 0);
   east.addScaledVector(up, -east.dot(up)).normalize();
   const north = new THREE.Vector3().crossVectors(up, east).normalize();
-  const geo = mesh.geometry, attr = geo.attributes.position;
+  const geo = mesh.userData.collisionGeometry || mesh.geometry, attr = geo.attributes.position;
   const vertices = [], p = new THREE.Vector3();
   let low = Infinity, high = -Infinity;
   for (let i = 0; i < attr.count; i++) {

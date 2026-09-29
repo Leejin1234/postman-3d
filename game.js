@@ -6,10 +6,11 @@ import { decodeRoadGeometry, installRoadGeometry, installJunctionFurniture } fro
 import { createLakeside, isLakeWater, lakePoint } from './lakeside.js?v=20260929-8';
 import { reduceSceneDensity } from './scene-density.js?v=20260929-9';
 import { raiseGrassLevel } from './grass-level.js?v=20260929-9';
-import { createCollisionWorld, sweepSphere } from './collision-world.js?v=20260929-2';
+import { createCollisionWorld, sweepSphere } from './collision-world.js?v=20260929-15';
 import { installSurfaceMaterials } from './surface-materials.js?v=20260929-11';
 import { installSoftTerrain, smoothTerrainNormals } from './soft-terrain.js?v=20260929-11';
 import { scatterMeadow, createMeadowPlants } from './meadow-plants.js?v=20260929-14';
+import { replaceStylizedTrees } from './stylized-trees.js?v=20260929-15';
 
 let meadowPlants = null;
 
@@ -2306,6 +2307,8 @@ async function boot() {
   if (DEBUG) console.info('Scene density:', density);
   const grassLevel = raiseGrassLevel(city);
   if (DEBUG) console.info('Grass level:', grassLevel);
+  const trees = replaceStylizedTrees(city);
+  if (DEBUG) console.info('Stylized trees:', trees);
   const terrainNormals = smoothTerrainNormals(city);
   if (DEBUG) console.info('Soft terrain:', terrainNormals);
   setProgress(0.59, '铺设草地与街道纹理…');
@@ -2335,7 +2338,7 @@ async function boot() {
   setProgress(0.66, '铺开街道与树影…');
   /* 减少场景物件后再创建描边；地表本身不能描边，避免包住整个星球。 */
   const inked = [];
-  city.traverse(o => { if (o.isMesh && !TERRAIN.test(o.name) && !/^Grass/i.test(o.name)) inked.push(o); });
+  city.traverse(o => { if (o.isMesh && !TERRAIN.test(o.name) && !/^Grass/i.test(o.name) && !o.userData.stylizedTree) inked.push(o); });
   for (const o of inked) addOutline(o, 0.015 * S);
   /* 地平线剔除要在描边之后建表：它顺手记下每个物体的描边壳，好按距离单独关掉 */
   prepareHorizon(city);
