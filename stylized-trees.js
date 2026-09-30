@@ -72,7 +72,7 @@ function reiLeaves(material, barkTexture = null) {
       shader.uniforms.treeBarkMap = {value:barkTexture};
       shader.fragmentShader = 'uniform sampler2D treeBarkMap;\n' + shader.fragmentShader;
       shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>',
-        '#include <color_fragment>\nif (leafDiskUv.x <= -2.5) diffuseColor *= texture2D(treeBarkMap, vec2(-3.0-leafDiskUv.x,leafDiskUv.y));');
+        '#include <color_fragment>\nif (leafDiskUv.x <= -2.5) { vec3 bark = texture2D(treeBarkMap, vec2(-3.0-leafDiskUv.x,leafDiskUv.y)).rgb; bark = mix(bark, vec3(.56,.42,.29), .28); diffuseColor.rgb *= bark * vec3(1.12,1.08,1.02); }');
     }
   };
   material.customProgramCacheKey = () => `rei-two-leaf-masks-bark-v3-${!!barkTexture}`;
@@ -196,8 +196,10 @@ export function replaceStylizedTrees(city, { mobile = false, trunkAsset = null }
       local.copy(point).sub(pivot); local.addScaledVector(up,-local.dot(up));
       oldTrunkRadius = Math.max(oldTrunkRadius,local.length());
     }
-    const height = T.MathUtils.clamp(top-bottom,22,48);
-    const width = height * (.88 + (id % 101) / 500);
+    const sourceHeight = T.MathUtils.clamp(top-bottom,22,48);
+    const height = sourceHeight * .93;
+    // Keep the existing crown width while lowering the canopy slightly.
+    const width = sourceHeight * (.88 + (id % 101) / 500);
     // Preserve narrow street-tree bases instead of widening their collision footprint.
     const ratio = Math.min(1, Math.max(.3,oldTrunkRadius) / ((trunkAsset?.baseRadius || .049) * width));
     const trunkScale = Math.max(.1,Math.floor(ratio * 10)/10), profileKey = `${id % variants.length}:${trunkScale}`;

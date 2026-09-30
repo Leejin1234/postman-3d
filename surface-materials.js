@@ -34,12 +34,12 @@ function surfaceMaterial(name, base, detail, { color, period, strength, grass = 
           + texture2D(surfaceBase, sp.xz).rgb * surfaceWeight.y
           + texture2D(surfaceBase, sp.xy).rgb * surfaceWeight.z;
         ${grass ? `float grassLight = dot(surfaceAlbedo, vec3(.2126,.7152,.0722));
-        float rollingColor = .5 + .25 * sin(dot(surfacePosition, vec3(.019,.027,.013)))
-          + .25 * sin(dot(surfacePosition, vec3(-.037,.011,.023)));
-        float grassTone = clamp(.26 + grassLight * 1.5 + rollingColor * .25, 0., 1.);
-        vec3 meadowColor = mix(vec3(.055,.135,.020), vec3(.25,.40,.065), grassTone);
+        float rollingColor = .5 + .13 * sin(dot(surfacePosition, vec3(.019,.027,.013)))
+          + .13 * sin(dot(surfacePosition, vec3(-.037,.011,.023)));
+        float grassTone = clamp(.30 + grassLight * 1.35 + rollingColor * .22, 0., 1.);
+        vec3 meadowColor = mix(vec3(.09,.20,.040), vec3(.34,.52,.105), grassTone);
         float slope = dot(normalize(surfaceWorldNormal), surfaceUp);
-        float meadowCover = smoothstep(.60, .88, slope);
+        float meadowCover = smoothstep(.50, .84, slope);
         vec3 limestone = mix(vec3(.28,.34,.32), vec3(.48,.54,.49), grassTone);
         surfaceAlbedo = mix(limestone, meadowColor, meadowCover);` : ''}
         diffuseColor.rgb *= surfaceAlbedo;

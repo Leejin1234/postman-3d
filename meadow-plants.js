@@ -43,8 +43,18 @@ export function scatterMeadow(planet, allowed = () => true) {
 
 function bladeGeometry(stem = false) {
   const positions = [], colors = [];
-  const dark = new T.Color(stem ? '#4b7942' : '#527c38'), light = new T.Color(stem ? '#96b66a' : '#bed578');
-  for (let j = 0; j < (stem ? 2 : 1); j++) {
+  const dark = new T.Color(stem ? '#4b7942' : '#477d3f'), light = new T.Color(stem ? '#96b66a' : '#b9d77b');
+  if (!stem) {
+    // Heart Town style: one soft, rounded blade per root. The shallow shoulder
+    // and curved tip catch light like broad meadow grass instead of sharp cards.
+    const width = .09, h = .78;
+    const points = [[-width,0],[width,0],[width * 1.02,h*.55],[width*.64,h*.88],[0,h],[-width*.64,h*.88],[-width*1.02,h*.55]];
+    const triangles = [0,1,2, 0,2,6, 6,2,3, 6,3,5, 5,3,4];
+    for (const index of triangles) {
+      const [x,y] = points[index]; positions.push(x,y,0);
+      const color = dark.clone().lerp(light, y / h); colors.push(color.r,color.g,color.b);
+    }
+  } else for (let j = 0; j < 2; j++) {
     const angle = j * 2.399, dx = Math.cos(angle), dz = Math.sin(angle);
     const width = stem ? .055 : .12, h = stem ? 1.38 : 1 - j * .13, lean = stem ? 0 : .16;
     const points = [[-width, 0], [width, 0], [width + lean, h * .9], [lean + width * .45, h], [lean - width * .45, h], [lean - width, h * .9]];
@@ -73,7 +83,7 @@ export function createMeadowPlants(scene, field, { mobile = false } = {}) {
         vec3 root = (modelMatrix * instanceMatrix * vec4(0.,0.,0.,1.)).xyz;
         float growth = 1. - smoothstep(meadowRange - 28., meadowRange, distance(root, meadowFocus));
         transformed *= growth;
-        transformed.x += sin(meadowTime * 1.65 + root.x * .16 + root.z * .11) * .10 * position.y * growth;
+        transformed.x += sin(meadowTime * 1.35 + root.x * .16 + root.z * .11) * .075 * position.y * growth;
       `);
       if (flower) shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', `
         float size = length(instanceMatrix[0].xyz);
@@ -97,6 +107,7 @@ export function createMeadowPlants(scene, field, { mobile = false } = {}) {
   const last = new T.Vector3(Infinity, 0, 0), p = new T.Vector3(), up = new T.Vector3(), scale = new T.Vector3();
   const q = new T.Quaternion(), yaw = new T.Quaternion(), axis = new T.Vector3(0, 1, 0), matrix = new T.Matrix4();
   const colors = ['#f3ce55', '#ead9b3'].map(c => new T.Color(c));
+  const grassTints = ['#6f9e4c','#86ad55','#9bc265','#b0cf76'].map(c => new T.Color(c));
   function update(time, focus) {
     uniforms.meadowTime.value = time; uniforms.meadowFocus.value.copy(focus);
     if (last.distanceToSquared(focus) < 36) return;
@@ -113,10 +124,11 @@ export function createMeadowPlants(scene, field, { mobile = false } = {}) {
       const seed = data[i + 3], flower = data[i + 4] > 0;
       if (gi >= capacity || (mobile && seed < .22)) continue;
       up.copy(p).normalize(); q.setFromUnitVectors(axis, up).multiply(yaw.setFromAxisAngle(axis, seed * Math.PI * 2));
-      const size = .85 + seed * .95;
+      const size = .68 + seed * .55;
       // Sink roots slightly so no sliver appears between blades and sloping land.
       matrix.compose(p.addScaledVector(up, -.08), q, scale.set(size, size, size));
       grass.setMatrixAt(gi++, matrix);
+      grass.setColorAt(gi - 1, grassTints[Math.min(grassTints.length - 1, Math.floor(seed * grassTints.length))]);
       if (flower && fi < stems.instanceMatrix.count) {
         stems.setMatrixAt(fi, matrix); blooms.setMatrixAt(fi, matrix);
         blooms.setColorAt(fi, colors[Math.min(colors.length - 1, Math.floor(seed * colors.length))]); fi++;
@@ -124,6 +136,7 @@ export function createMeadowPlants(scene, field, { mobile = false } = {}) {
     }
     grass.count = gi; stems.count = blooms.count = fi;
     for (const mesh of [grass, stems, blooms]) mesh.instanceMatrix.needsUpdate = true;
+    if (grass.instanceColor) grass.instanceColor.needsUpdate = true;
     if (blooms.instanceColor) blooms.instanceColor.needsUpdate = true;
   }
   return { update, grass, stems, blooms, stats: { ...field.stats, maxGrass: capacity, range, drawCalls: 3 } };
