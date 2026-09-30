@@ -189,7 +189,7 @@ export function buildRoundedJunctions(mesh) {
     }
     j.outline = polygon;
   }
-  const corridors = [];
+  const corridors = [], crosswalks = [];
   for (let ji = 0; ji < junctions.length; ji++) for (const arm of junctions[ji].arms) {
     const j = junctions[ji], other = arm.destination, oi = junctions.indexOf(other);
     if (oi < ji) continue;
@@ -202,6 +202,22 @@ export function buildRoundedJunctions(mesh) {
     function at(s, width, radius) {
       return j.up.clone().multiplyScalar(Math.cos(s) * BASE)
         .addScaledVector(arm.direction, Math.sin(s) * BASE).addScaledVector(side, width).normalize().multiplyScalar(radius);
+    }
+    const crossings=[];
+    // Put one crossing at every mouth of a true intersection. Two-arm bends
+    // stay unmarked. Use the same great-circle coordinates as the asphalt.
+    if(j.arms.length>=3)crossings.push({junction:ji,from:start+4/BASE,to:start+20/BASE});
+    if(other.arms.length>=3)crossings.push({junction:oi,from:end-20/BASE,to:end-4/BASE});
+    if(crossings.length===2&&crossings[0].to+4/BASE>crossings[1].from)throw new Error('Crosswalks overlap');
+    for(const crossing of crossings){
+      if(crossing.from<start||crossing.to>end)throw new Error('Crosswalk exceeds road corridor');
+      for(let stripe=0;stripe<9;stripe++){
+        const w=-26+stripe*6.1;
+        quad(lineIndex,at(crossing.from,w,ROAD),at(crossing.to,w,ROAD),
+          at(crossing.to,w+3.2,ROAD),at(crossing.from,w+3.2,ROAD));
+      }
+      crosswalks.push({...crossing,corridor:corridors.length,stripes:9,
+        position:at((crossing.from+crossing.to)/2,0,ROAD).toArray()});
     }
     const count = Math.ceil((end - start) * BASE / 8);
     const curbRepeats = Math.max(1, Math.round((end - start) * WALK / 4));
@@ -218,7 +234,7 @@ export function buildRoundedJunctions(mesh) {
         quad(curbIndex, at(a, sign * OUTER, WALK + .02), at(b, sign * OUTER, WALK + .02), at(b, innerEdge, WALK + .02), at(a, innerEdge, WALK + .02), u0, u1);
       }
     }
-    corridors.push({ j, other, arm, reverse, start, end, side });
+    corridors.push({ j, other, arm, reverse, start, end, side, crossings, at });
   }
   // Retain the original lane stripe layout outside each rebuilt intersection.
   function clip(poly, plane) {
@@ -241,8 +257,26 @@ export function buildRoundedJunctions(mesh) {
         if (along < -0.03 || along > full + 0.03) continue;
         const pa = road.arm.direction.clone().addScaledVector(road.j.up, -road.arm.cut / BASE);
         const pb = road.reverse.direction.clone().addScaledVector(road.other.up, -road.reverse.cut / BASE);
-        let poly = clip(clip(points, pa), pb);
-        for (let k = 1; k < poly.length - 1; k++) triangle(lineIndex, poly[0], poly[k], poly[k + 1]);
+        let pieces = [clip(clip(points, pa), pb)];
+        // Interrupt old lane dashes through crossings. Keep the edge lines
+        // outside the 56-unit pedestrian band and avoid paint-on-paint overlap.
+        for(const crossing of road.crossings){
+          const alongPlane=s=>road.arm.direction.clone().multiplyScalar(Math.cos(s)).addScaledVector(road.j.up,-Math.sin(s));
+          const mid=(crossing.from+crossing.to)/2;
+          const forward=road.j.up.clone().multiplyScalar(Math.cos(mid)).addScaledVector(road.arm.direction,Math.sin(mid));
+          const planes=[alongPlane(crossing.from-1/BASE),alongPlane(crossing.to+1/BASE).negate(),
+            road.side.clone().addScaledVector(forward,28/BASE),road.side.clone().negate().addScaledVector(forward,28/BASE)];
+          const outside=[];
+          for(let piece of pieces){
+            for(const plane of planes){
+              const fragment=clip(piece,plane.clone().negate());
+              if(fragment.length>=3)outside.push(fragment);
+              piece=clip(piece,plane);if(piece.length<3)break;
+            }
+          }
+          pieces=outside;
+        }
+        for(const poly of pieces)for (let k = 1; k < poly.length - 1; k++) triangle(lineIndex, poly[0], poly[k], poly[k + 1]);
         break;
       }
     }
@@ -259,8 +293,8 @@ export function buildRoundedJunctions(mesh) {
   geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geometry.computeBoundingBox(); geometry.computeBoundingSphere();
-  return { geometry, junctions, corridors, sectorPath, world,
-    stats: { junctions: junctions.length, corners: junctions.reduce((n, j) => n + j.sectors.length, 0), corridors: corridors.length, triangles: positions.length / 9 } };
+  return { geometry, junctions, corridors, crosswalks, sectorPath, world,
+    stats: { junctions: junctions.length, corners: junctions.reduce((n, j) => n + j.sectors.length, 0), corridors: corridors.length, crosswalks:crosswalks.length, triangles: positions.length / 9 } };
 }
 
 export function relocateJunctionFurniture(city, plan) {

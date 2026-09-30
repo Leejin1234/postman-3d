@@ -2287,7 +2287,7 @@ async function boot() {
   fitPlanet(city);
   setProgress(0.54, '连接圆弧路口…');
   const [roundedRoads, junctionFurniture, softTerrain, terrainProps] = await Promise.all([
-    withRetry('./assets/roads-rounded-v5.bin', () => fetchAsset('./assets/roads-rounded-v5.bin')),
+    withRetry('./assets/roads-rounded-v6.bin', () => fetchAsset('./assets/roads-rounded-v6.bin')),
     withRetry('./assets/junction-furniture-v2.json', () => fetchAsset('./assets/junction-furniture-v2.json')),
     withRetry('./assets/terrain-soft-v1.bin', () => fetchAsset('./assets/terrain-soft-v1.bin')),
     withRetry('./assets/terrain-props-v1.json', () => fetchAsset('./assets/terrain-props-v1.json'))
