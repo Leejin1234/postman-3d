@@ -107,7 +107,10 @@ function bladeGeometry(stem = false) {
 }
 
 export function createMeadowPlants(scene, field, { mobile = false, model = null } = {}) {
-  const range = mobile ? 85 : 120, capacity = mobile ? 28000 : 64000;
+  const range = mobile ? 85 : 120;
+  // grass.fbx is a rounded multi-blade clump (220 triangles), so using the
+  // old single-blade capacity would multiply the scene cost unnecessarily.
+  const capacity = model ? (mobile ? 6000 : 14000) : (mobile ? 28000 : 64000);
   const uniforms = { meadowTime: { value: 0 }, meadowFocus: { value: new T.Vector3() }, meadowRange: { value: range } };
   function material(flower = false) {
     const mat = flower ? new T.MeshBasicMaterial({ color: 0xffffff, side: T.DoubleSide })
