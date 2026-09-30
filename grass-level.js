@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { lakeMetric } from './lakeside.js?v=20260929-8';
+import { lakeMetric } from './lakeside.js?v=20260930-21';
 
 const WALK = 602 + 2.6 / 3;
 const smooth = x => { x = THREE.MathUtils.clamp(x, 0, 1); return x * x * (3 - 2 * x); };

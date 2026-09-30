@@ -1,5 +1,5 @@
 import * as T from 'three';
-import { lakeMetric } from './lakeside.js?v=20260929-8';
+import { lakeMetric } from './lakeside.js?v=20260930-21';
 
 const CELL = 48;
 const key = (x, y, z) => `${x},${y},${z}`;

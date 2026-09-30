@@ -3,13 +3,13 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { createAtmosphere, createDriftingSeeds } from './atmosphere.js?v=20260928';
 import { decodeRoadGeometry, installRoadGeometry, installJunctionFurniture } from './road-geometry.js?v=20260928-4';
-import { createLakeside, isLakeWater, lakePoint } from './lakeside.js?v=20260929-19';
+import { createLakeside, isLakeWater, lakePoint } from './lakeside.js?v=20260930-21';
 import { reduceSceneDensity } from './scene-density.js?v=20260929-9';
-import { raiseGrassLevel } from './grass-level.js?v=20260929-9';
+import { raiseGrassLevel } from './grass-level.js?v=20260930-21';
 import { createCollisionWorld, sweepSphere } from './collision-world.js?v=20260929-15';
 import { installSurfaceMaterials } from './surface-materials.js?v=20260929-11';
 import { installSoftTerrain, smoothTerrainNormals } from './soft-terrain.js?v=20260929-11';
-import { scatterMeadow, createMeadowPlants } from './meadow-plants.js?v=20260929-14';
+import { scatterMeadow, createMeadowPlants } from './meadow-plants.js?v=20260930-21';
 import { replaceStylizedTrees } from './stylized-trees.js?v=20260929-19';
 import { roundSceneRocks } from './rounded-rocks.js?v=20260929-19';
 import { installFloatingStick } from './floating-stick.js?v=20260929-16';
@@ -2407,7 +2407,7 @@ async function boot() {
   state.q.copy(pickSpawn());
   // Shareable lake view: start on the existing street facing the new scenery.
   if (new URLSearchParams(location.search).has('lake')) {
-    const lakeTarget = lakePoint(0, 0);
+    const lakeTarget = lakePoint(0, -165);
     let best = null;
     for (let x = -230; x <= 30; x += 8) for (let z = 160; z <= 290; z += 8) {
       const p = lakePoint(x, z, 602), up = p.clone().sub(PLANET.C).normalize();

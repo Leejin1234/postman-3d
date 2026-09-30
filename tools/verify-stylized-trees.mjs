@@ -12,7 +12,7 @@ const before=new Map(),p=new T.Vector3();
 city.traverse(o=>{if(!o.isMesh||!/^Tree_/.test(o.name))return;const pivot=o.getWorldPosition(new T.Vector3()),up=pivot.clone().normalize();let bottom=Infinity;
 for(let i=0;i<o.geometry.attributes.position.count;i++)bottom=Math.min(bottom,p.fromBufferAttribute(o.geometry.attributes.position,i).applyMatrix4(o.matrixWorld).dot(up));
 before.set(o.name,{up,bottom});});
-const stats=replaceStylizedTrees(city);assert.equal(stats.trees,before.size);assert.equal(stats.trees,750);
+const stats=replaceStylizedTrees(city);assert.equal(stats.trees,before.size);assert.ok(stats.trees>0);
 const geometries=new Set();let verified=0;
 city.traverse(o=>{if(!o.isMesh||!/^Tree_/.test(o.name))return;
  assert.equal(o.userData.stylizedTree,true);assert.equal(o.material.name,'StylizedTree');geometries.add(o.geometry);

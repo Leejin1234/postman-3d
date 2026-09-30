@@ -1,6 +1,7 @@
 import * as T from 'three';
 import { mergeGeometries } from './vendor/utils/BufferGeometryUtils.js';
 import {createMossRockMaterial,addMossCoordinates} from './rounded-rocks.js?v=20260929-19';
+import {installClearLake} from './lake-water.js?v=20260930-21';
 
 // The wooded basin behind Bld_0333, identified against the user's marked view.
 const oldUp = new T.Vector3(-365,405,-330).normalize();
@@ -9,16 +10,21 @@ towardTown.addScaledVector(oldUp,-towardTown.dot(oldUp)).normalize();
 export const LAKE_UP = oldUp.clone().multiplyScalar(600).addScaledVector(towardTown,-25).normalize();
 const Z = towardTown.clone().addScaledVector(LAKE_UP,-towardTown.dot(LAKE_UP)).normalize();
 const X = new T.Vector3().crossVectors(LAKE_UP,Z).normalize();
-const WATER = 599.4, RX = 122, RZ = 83;
+export const LAKE_WATER = 599.4;
+// Integral of the gnomonic footprint on radius 599.4: 155794.35 / 31158.87 = 5.
+const WATER = LAKE_WATER, RX = 243.84388749, RZ = 248.92396848, CENTER_Z = -165;
+export const LAKE_BOUNDS={rx:RX,rz:RZ,centerZ:CENTER_Z,areaRatio:5};
 const smooth = (a,b,x) => {const t=T.MathUtils.clamp((x-a)/(b-a),0,1);return t*t*(3-2*t);};
 export function lakePoint(x,z,r=WATER){return LAKE_UP.clone().multiplyScalar(600).addScaledVector(X,x).addScaledVector(Z,z).normalize().multiplyScalar(r);}
 function coords(p){const d=p.dot(LAKE_UP);return d>0?new T.Vector2(600*p.dot(X)/d,600*p.dot(Z)/d):new T.Vector2(1e6,1e6);}
 function boundary(a){return 1+.075*Math.sin(3*a+.5)+.045*Math.cos(5*a-.7)+.025*Math.sin(7*a);}
-function metric(x,z){return Math.hypot(x/RX,z/RZ)/boundary(Math.atan2(z/RZ,x/RX));}
-function polar(a,s){return [RX*Math.cos(a)*boundary(a)*s,RZ*Math.sin(a)*boundary(a)*s];}
-function bedRadius(q,original){const inner=592+7.4*smooth(.65,1,q);const rim=599.4+2.3*smooth(1,1.13,q);return q<1?inner:T.MathUtils.lerp(rim,original,smooth(1.13,1.45,q));}
+function metric(x,z){z-=CENTER_Z;return Math.hypot(x/RX,z/RZ)/boundary(Math.atan2(z/RZ,x/RX));}
+export function lakePolar(a,s){return [RX*Math.cos(a)*boundary(a)*s,CENTER_Z+RZ*Math.sin(a)*boundary(a)*s];}
+const polar=lakePolar;
+export function lakeBedRadius(q,original=602){const inner=590.4+8.78*smooth(.40,1,q);const rim=599.18+2.52*smooth(1,1.10,q);return q<1?inner:T.MathUtils.lerp(rim,original,smooth(1.10,1.24,q));}
+const bedRadius=lakeBedRadius;
 export function lakeMetric(point){const p=coords(point);return metric(p.x,p.y);}
-export function isLakeWater(point){const d=point.dot(LAKE_UP);if(d<point.length()*.93)return false;const x=600*point.dot(X)/d,z=600*point.dot(Z)/d;return metric(x,z)<1&&!onDock(x,z);}
+export function isLakeWater(point){const d=point.dot(LAKE_UP);if(d<=0)return false;const x=600*point.dot(X)/d,z=600*point.dot(Z)/d;return metric(x,z)<1&&!onDock(x,z);}
 function onDock(x,z){return (Math.abs(x-28)<4.4&&z>38.5&&z<100)||(Math.abs(x-28)<11.5&&z>36.5&&z<43.5);}
 
 export function createLakeside(city, { includeReeds = false } = {}){
@@ -33,7 +39,7 @@ export function createLakeside(city, { includeReeds = false } = {}){
     const near=cs.some(p=>metric(p.x,p.y)<1.7);
     const lengths=[a.p.distanceToSquared(b.p),b.p.distanceToSquared(c.p),c.p.distanceToSquared(a.p)];
     if(near&&Math.max(...lengths)>36&&depth<9){const i=lengths.indexOf(Math.max(...lengths)),u=ps[i],v=ps[(i+1)%3],w=ps[(i+2)%3],m={p:u.p.clone().lerp(v.p,.5),uv:u.uv.clone().lerp(v.uv,.5)};emit(u,m,w,depth+1);emit(m,v,w,depth+1);return;}
-    for(let k=0;k<3;k++){const p=ps[k].p.clone(),q=metric(cs[k].x,cs[k].y);if(q<1.45){p.setLength(bedRadius(q,p.length()));changed++;}p.applyMatrix4(inv);positions.push(...p.toArray());uvs.push(...ps[k].uv.toArray());}
+    for(let k=0;k<3;k++){const p=ps[k].p.clone(),q=metric(cs[k].x,cs[k].y);if(q<1.24){p.setLength(bedRadius(q,p.length())-.45*(1-smooth(1.1,1.24,q)));changed++;}p.applyMatrix4(inv);positions.push(...p.toArray());uvs.push(...ps[k].uv.toArray());}
   }
   for(const g of source.groups.length?source.groups:[{start:0,count:source.index?source.index.count:source.attributes.position.count,materialIndex:0}]){const start=positions.length/3;for(let i=g.start;i<g.start+g.count;i+=3)emit(read(i),read(i+1),read(i+2));groups.push({...g,start,count:positions.length/3-start});}
   const terrain=new T.BufferGeometry();terrain.setAttribute('position',new T.Float32BufferAttribute(positions,3));terrain.setAttribute('uv',new T.Float32BufferAttribute(uvs,2));terrain.groups=groups;terrain.computeVertexNormals();terrain.computeBoundingSphere();planet.geometry=terrain;
@@ -55,20 +61,8 @@ export function createLakeside(city, { includeReeds = false } = {}){
   function batch(geo,mat,matrix){if(matrix)geo.applyMatrix4(matrix);if(!batches.has(mat))batches.set(mat,[]);batches.get(mat).push(geo.index?geo.toNonIndexed():geo);}
   function frame(x,z,radius=WATER){const p=lakePoint(x,z,radius),up=p.clone().normalize(),east=X.clone().addScaledVector(up,-X.dot(up)).normalize(),south=new T.Vector3().crossVectors(east,up);return new T.Matrix4().makeBasis(east,up,south).setPosition(p);}
   function box(x,z,r,w,h,d,mat){batch(new T.BoxGeometry(w,h,d),mat,frame(x,z,r));}
-  const N=128;
-  function surface(rings,mat,name){const p=[],colors=[];function push(x,z,r,s){p.push(...lakePoint(x,z,r).toArray());const color=new T.Color().lerpColors(new T.Color(0x427d7e),new T.Color(0x8fbbac),smooth(.6,1,s));colors.push(...color.toArray());}for(let j=0;j<rings.length-1;j++)for(let i=0;i<N;i++){const a=i/N*Math.PI*2,b=(i+1)/N*Math.PI*2,sa=rings[j],sb=rings[j+1],points=[[a,sa],[b,sa],[b,sb],[a,sa],[b,sb],[a,sb]];for(const[t,s]of points){const[x,z]=polar(t,s);push(x,z,name==='Planet_LakeShore'?bedRadius(s,602)+.10:WATER,s);}}const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(p,3));g.setAttribute('color',new T.Float32BufferAttribute(colors,3));g.computeVertexNormals();const mesh=new T.Mesh(g,mat);mesh.name=name;mesh.receiveShadow=true;root.add(mesh);return mesh;}
-  surface([1,1.025,1.055,1.09,1.12],materials.sand,'Planet_LakeShore');
-  const waterMat=new T.MeshPhongMaterial({color:0xffffff,vertexColors:true,shininess:45,specular:0x547a74,side:T.DoubleSide});
-  const time={value:0};
-  waterMat.onBeforeCompile=shader=>{shader.uniforms.lakeTime=time;shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 lakePosition;').replace('#include <begin_vertex>','#include <begin_vertex>\nlakePosition=position;');shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nuniform float lakeTime; varying vec3 lakePosition;').replace('#include <color_fragment>','#include <color_fragment>\nfloat ripple=sin(dot(lakePosition,vec3(.13,.18,.09))+lakeTime*.7)*sin(dot(lakePosition,vec3(.22,-.12,.17))-lakeTime*.45); diffuseColor.rgb*=1.+.035*ripple;');};
-  waterMat.customProgramCacheKey=()=> 'lake-water-v1';
-  const water=surface([0,.15,.3,.45,.6,.72,.82,.9,.95,1],waterMat,'LakeWater');
-  const waterPositions=water.geometry.attributes.position,waterNormals=water.geometry.attributes.normal;
-  for(let i=0;i<waterPositions.count;i++){const n=new T.Vector3().fromBufferAttribute(waterPositions,i).normalize();waterNormals.setXYZ(i,n.x,n.y,n.z);}
-  // Low-cost ripples and shoreline fragments, merged into a single draw call.
-  const rippleMat=new T.MeshBasicMaterial({color:0xd4e4d0,transparent:true,opacity:.34,depthWrite:false,side:T.DoubleSide});
+  const clearLake=installClearLake(root,{point:lakePoint,polar,bedRadius,frame,waterRadius:WATER,metric});
   let seed=491;const random=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;};
-  for(let i=0;i<90;i++){const a=random()*Math.PI*2,s=.15+random()*.78,[x,z]=polar(a,s),len=2+random()*6;const g=new T.BufferGeometry();const p=[];for(const [xx,zz]of [[x-len/2,z],[x+len/2,z+.5],[x+len/2,z+.8],[x-len/2,z],[x+len/2,z+.8],[x-len/2,z+.3]])p.push(...lakePoint(xx,zz,WATER+.07).toArray());g.setAttribute('position',new T.Float32BufferAttribute(p,3));g.computeVertexNormals();batch(g,rippleMat);}
   // Dock follows the planet curvature; a separate deck is included in ground baking.
   const deck=[];for(let i=0;i<=25;i++){const z=39+i*2.4;const g=new T.BoxGeometry(10,.85,2.17);g.applyMatrix4(frame(28,z,602.1));deck.push(g.toNonIndexed());const support=new T.BoxGeometry(9.6,.35,2.45);support.applyMatrix4(frame(28,z,601.7));deck.push(support.toNonIndexed());}
   for(let x=17;x<=39;x+=2.4){const g=new T.BoxGeometry(2.17,.85,9);g.applyMatrix4(frame(x,40,602.1));deck.push(g.toNonIndexed());const support=new T.BoxGeometry(2.45,.35,8.6);support.applyMatrix4(frame(x,40,601.7));deck.push(support.toNonIndexed());}
@@ -83,7 +77,7 @@ export function createLakeside(city, { includeReeds = false } = {}){
   const boats=[];
   function boat(x,z,heading,sail,color){const group=new T.Group();group.name='LakeBoat';root.add(group);const hullPoints=[[-2.5,-5],[2.5,-5],[3,2],[0,7],[-3,2]],shape=new T.Shape();shape.moveTo(...hullPoints[0]);for(const p of hullPoints.slice(1))shape.lineTo(...p);shape.closePath();const geo=new T.ExtrudeGeometry(shape,{depth:1.7,bevelEnabled:true,bevelSize:.65,bevelThickness:.6,bevelSegments:1,steps:1});geo.rotateX(-Math.PI/2);const hull=new T.Mesh(geo,materials[color]);hull.position.y=-.8;group.add(hull);const inside=new T.Mesh(new T.BoxGeometry(4.1,.3,7.5),materials.darkWood);inside.position.set(0,1.1,0);group.add(inside);for(const z of[-2.8,1.5]){const seat=new T.Mesh(new T.BoxGeometry(4.7,.55,1),materials.lightWood);seat.position.set(0,1.6,z);group.add(seat);}if(sail){const mast=new T.Mesh(new T.CylinderGeometry(.2,.28,15,7),materials.darkWood);mast.position.set(0,8,0);group.add(mast);const sg=new T.BufferGeometry();sg.setAttribute('position',new T.Float32BufferAttribute([.25,3.5,0,.25,15.5,0,6.5,4.2,2,-.25,4,0,-.25,13.5,0,-4.8,4,1.4],3));sg.computeVertexNormals();group.add(new T.Mesh(sg,materials.cream));}else{for(const side of[-1,1]){const oar=new T.Mesh(new T.BoxGeometry(.25,.25,10),materials.lightWood);oar.position.set(side*3,1.8,0);oar.rotation.y=side*.6;group.add(oar);}}
     const matrix=frame(x,z,WATER+.5),base=new T.Quaternion().setFromRotationMatrix(matrix);group.position.setFromMatrixPosition(matrix);group.quaternion.copy(base).multiply(new T.Quaternion().setFromAxisAngle(new T.Vector3(0,1,0),heading));boats.push({group,base:group.quaternion.clone(),p:group.position.clone(),up:group.position.clone().normalize(),phase:boats.length*2});}
-  boat(44,51,.15,false,'red');boat(-43,-6,.3,true,'green');boat(39,-30,-.3,true,'wood');
+  boat(44,40,.15,false,'red');boat(-75,-145,.3,true,'green');boat(85,-235,-.3,true,'wood');
   city.updateMatrixWorld(true);
-  return {root,stats:{terrainVerticesChanged:changed,vegetationRemoved:remove.length,vegetationAdjusted:reposition.length,boats:boats.length},update(t){time.value=t;for(const b of boats){b.group.position.copy(b.p).addScaledVector(b.up,.18*Math.sin(t*1.1+b.phase));b.group.quaternion.copy(b.base).multiply(new T.Quaternion().setFromEuler(new T.Euler(.015*Math.sin(t+b.phase),0,.025*Math.sin(t*.8+b.phase))));}},waterContains:isLakeWater};
+  return {root,stats:{terrainVerticesChanged:changed,vegetationRemoved:remove.length,vegetationAdjusted:reposition.length,boats:boats.length,...clearLake.stats,areaRatio:5},update(t){clearLake.update(t);for(const b of boats){b.group.position.copy(b.p).addScaledVector(b.up,.18*Math.sin(t*1.1+b.phase));b.group.quaternion.copy(b.base).multiply(new T.Quaternion().setFromEuler(new T.Euler(.015*Math.sin(t+b.phase),0,.025*Math.sin(t*.8+b.phase))));}},waterContains:isLakeWater};
 }
