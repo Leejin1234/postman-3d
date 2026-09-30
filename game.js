@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {loadPanda, PANDA_URL} from './panda-character.js?v=20260930-27';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { createAtmosphere, createDriftingSeeds } from './atmosphere.js?v=20260928';
@@ -1496,29 +1497,6 @@ const foot = { speed: 0, vy: 0, air: false, swimming: false, h: 0, q: new THREE.
 /* ---------- 骨骼动画 ---------- */
 const boy = { pivot: null, mixer: null, actions: {}, cur: '', seat: new THREE.Vector3() };
 
-/* 同名动画有两套（Armature| 前缀 / 无前缀），挑绑定成功率最高的那条 */
-function pickClip(anims, key, root) {
-  const hits = anims
-    .filter(c => c.name.toLowerCase().endsWith(key))
-    .map(c => {
-      let ok = 0;
-      for (const t of c.tracks) if (root.getObjectByName(t.name.split('.')[0])) ok++;
-      return { c, ok };
-    })
-    .sort((a, b) => b.ok - a.ok);
-  return hits.length ? hits[0].c : null;
-}
-
-/* 动画自带位移会让角色飘走，去掉根节点平移，改由代码推进 */
-function stripRootMotion(clip) {
-  const roots = ['Armature', 'Root'];
-  clip.tracks = clip.tracks.filter(t => {
-    const [node, prop] = t.name.split('.');
-    return !(prop === 'position' && roots.includes(node));
-  });
-  return clip;
-}
-
 function playAnim(name, { fade = 0.18, once = false, speed = 1 } = {}) {
   const a = boy.actions[name];
   if (!a) return null;
@@ -2375,42 +2353,15 @@ async function boot() {
   buildCars(carRoot, atlas);
 
   setProgress(0.85, '加载小熊猫与骨骼动作…');
-  const boyRoot = await loadOne('./assets/characters/red-panda-v1.fbx');
+  const boyRoot = await withRetry(PANDA_URL, async () => loadPanda(await fetchAsset(PANDA_URL)));
   normalize(boyRoot, { height: CFG.riderHeight });
-  const pandaMap = await loadTex('./assets/characters/red-panda-color-v1.jpg');
-  const pandaMaterial = new THREE.MeshLambertMaterial({ map: pandaMap, color: 0xffffff });
-  boyRoot.traverse(o => { if (o.isMesh) { o.material = pandaMaterial; o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; } });
 
   boy.pivot = new THREE.Group();
   boy.pivot.add(boyRoot);
   boy.mixer = new THREE.AnimationMixer(boyRoot);
 
-  const clipOf = k => pickClip(boyRoot.animations, k, boyRoot);
-  const sitClip = clipOf('sit');
-  const walkClip = clipOf('walk');
-  const runClip = clipOf('run');
-  const jumpClip = clipOf('jump');
-  const waitClip = clipOf('idle');
-  const swimClip = clipOf('swim');
-  if (walkClip) stripRootMotion(walkClip);
-  if (runClip) stripRootMotion(runClip);
-  if (jumpClip) stripRootMotion(jumpClip);
-  if (waitClip) stripRootMotion(waitClip);
-  if (sitClip) boy.actions.sit = boy.mixer.clipAction(sitClip);
-  if (walkClip) boy.actions.walk = boy.mixer.clipAction(walkClip);
-  if (waitClip) boy.actions.idle = boy.mixer.clipAction(waitClip);
-  else if (walkClip) {
-    /* 模型里没有待机动画时的退路：拿行走的第一帧冻住当站姿 */
-    const idle = boy.mixer.clipAction(walkClip.clone());
-    idle.timeScale = 0;
-    boy.actions.idle = idle;
-  }
-  if (runClip) boy.actions.run = boy.mixer.clipAction(runClip);
-  if (jumpClip) boy.actions.jump = boy.mixer.clipAction(jumpClip);
-  if (swimClip) boy.actions.swim = boy.mixer.clipAction(swimClip);
-  for (const name of ['idle', 'sit', 'walk', 'run', 'swim', 'jump']) {
-    if (!boy.actions[name]) throw new Error('小熊猫动作缺失：' + name);
-  }
+  // Keep all six supplied GLB clips intact, including their original hip motion.
+  for (const clip of boyRoot.animations) boy.actions[clip.name] = boy.mixer.clipAction(clip);
 
   /* 用骑坐姿势下的骨盆高度对齐座垫，避免人浮在车上或陷进车里 */
   scene.add(boy.pivot);

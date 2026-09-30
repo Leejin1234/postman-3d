@@ -6,7 +6,7 @@ export function verifyPandaGame(c){
  state.speed=0;c.dismount();keys.KeyW=false;keys.ShiftLeft=false;tick(60);check('站立动画',boy.cur==='idle',boy.cur);
  const start=walker.position.clone();keys.KeyW=true;tick(90);check('走路移动与动画',walker.position.distanceTo(start)>1&&boy.cur==='walk',boy.cur);
  keys.ShiftLeft=true;tick(90);check('跑步动画',boy.cur==='run',boy.cur);keys.KeyW=false;keys.ShiftLeft=false;tick(90);
- c.queueJump();tick(5);check('跳跃动画',foot.air&&boy.cur==='jump',boy.cur);tick(120);check('落地恢复',!foot.air&&boy.cur==='idle',boy.cur);
+ c.queueJump();tick(5);check('原生跳跃动画',foot.air&&boy.cur==='jump',boy.cur);tick(120);check('落地恢复',!foot.air&&boy.cur==='idle',boy.cur);
  const shore=lakePoint(...lakePolar(0,1.04),602),deep=lakePoint(...lakePolar(0,.35),602);
  foot.q.copy(c.frameFromDir(shore.clone().normalize(),deep.clone().sub(shore)));foot.speed=0;foot.swimming=false;foot.air=false;foot.h=0;foot.vy=0;foot.gr=undefined;foot.camOff=0;c.syncBody(walker,foot.q,0,foot,1);c.updateCamera(1);c.camera.updateMatrixWorld(true);
  keys.KeyW=true;let entered=false;for(let i=0;i<1800;i++){tick(1);if(foot.swimming){entered=true;break}}keys.KeyW=false;tick(90);
