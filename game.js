@@ -3,13 +3,13 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { createAtmosphere, createDriftingSeeds } from './atmosphere.js?v=20260928';
 import { decodeRoadGeometry, installRoadGeometry, installJunctionFurniture } from './road-geometry.js?v=20260928-4';
-import { createLakeside, isLakeWater, lakePoint } from './lakeside.js?v=20260930-21';
+import { createLakeside, isLakeWater, lakePoint } from './lakeside.js?v=20260930-22';
 import { reduceSceneDensity } from './scene-density.js?v=20260929-9';
-import { raiseGrassLevel } from './grass-level.js?v=20260930-21';
+import { raiseGrassLevel } from './grass-level.js?v=20260930-22';
 import { createCollisionWorld, sweepSphere } from './collision-world.js?v=20260929-15';
 import { installSurfaceMaterials } from './surface-materials.js?v=20260929-11';
 import { installSoftTerrain, smoothTerrainNormals } from './soft-terrain.js?v=20260929-11';
-import { scatterMeadow, createMeadowPlants } from './meadow-plants.js?v=20260930-21';
+import { scatterMeadow, createMeadowPlants } from './meadow-plants.js?v=20260930-22';
 import { replaceStylizedTrees } from './stylized-trees.js?v=20260929-19';
 import { roundSceneRocks } from './rounded-rocks.js?v=20260929-19';
 import { installFloatingStick } from './floating-stick.js?v=20260929-16';
@@ -2447,7 +2447,7 @@ async function boot() {
 
   await new Promise(r => setTimeout(r, 16));
 
-  initTraffic(IS_MOBILE ? 7 : 11);
+  initTraffic(IS_MOBILE ? 4 : 6);
   if (/(\?|&)foot/.test(location.search)) dismount();
 
   syncHud();

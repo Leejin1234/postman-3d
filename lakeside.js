@@ -1,7 +1,7 @@
 import * as T from 'three';
 import { mergeGeometries } from './vendor/utils/BufferGeometryUtils.js';
 import {createMossRockMaterial,addMossCoordinates} from './rounded-rocks.js?v=20260929-19';
-import {installClearLake} from './lake-water.js?v=20260930-21';
+import {installClearLake} from './lake-water.js?v=20260930-22';
 
 // The wooded basin behind Bld_0333, identified against the user's marked view.
 const oldUp = new T.Vector3(-365,405,-330).normalize();

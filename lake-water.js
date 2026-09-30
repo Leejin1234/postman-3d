@@ -35,7 +35,7 @@ export function installClearLake(root,{point,polar,bedRadius,frame,waterRadius,m
     };
     material.customProgramCacheKey=()=>key;return material;
   }
-  const sandMat=shaderMaterial(new T.MeshLambertMaterial({color:0xffffff,side:T.DoubleSide,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-2}),'clear-lake-sand-v1',`
+  const sandFragment=`
     float q=lakeQ(lakeUv),grain=lakeNoise(lakeUv*2.4),dunes=lakeNoise(lakeUv*.055);
     vec3 dry=vec3(.63,.52,.32),wet=vec3(.26,.41,.32),deep=vec3(.045,.20,.20);
     vec3 sand=mix(deep,wet,smoothstep(.25,.95,q));sand=mix(sand,dry,smoothstep(.99,1.065,q));
@@ -43,8 +43,18 @@ export function installClearLake(root,{point,polar,bedRadius,frame,waterRadius,m
     float underwater=1.0-smoothstep(.96,1.01,q);
     sand+=vec3(.06,.11,.095)*caustic(lakeUv)*underwater;
     diffuseColor.rgb*=sand;
+  `;
+  const sandOptions={color:0xffffff,side:T.DoubleSide,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-2};
+  const sandMat=shaderMaterial(new T.MeshLambertMaterial(sandOptions),'clear-lake-sand-v2',sandFragment);
+  const sand=meshSurface(Array.from({length:53},(_,i)=>i*1.04/52),q=>bedRadius(q)+.14,sandMat,'Planet_LakeShore');sand.receiveShadow=true;
+  // Only the dry outer rim blends over the real grass texture. Keep the lakebed
+  // opaque and draw this shallow overlay before water, without writing depth.
+  const edgeMat=shaderMaterial(new T.MeshLambertMaterial({...sandOptions,transparent:true,depthWrite:false,side:T.FrontSide}),'clear-lake-sand-edge-v1',sandFragment+`
+    float edgeNoise=(lakeNoise(lakeUv*.12)-.5)*.012;
+    diffuseColor.a=1.0-smoothstep(1.048,1.112,q+edgeNoise);
   `);
-  const sand=meshSurface(Array.from({length:57},(_,i)=>i*1.12/56),q=>bedRadius(q)+.14,sandMat,'Planet_LakeShore');sand.receiveShadow=true;
+  const edge=meshSurface(Array.from({length:9},(_,i)=>1.04+i*.01),q=>bedRadius(q)+.14,edgeMat,'LakeShoreBlend');
+  edge.receiveShadow=true;edge.renderOrder=2;
   const waterMat=shaderMaterial(new T.MeshPhongMaterial({color:0xffffff,transparent:true,opacity:.32,depthWrite:false,side:T.FrontSide,shininess:95,specular:0x9ccdc4}),'clear-lake-water-v1',`
     float q=lakeQ(lakeUv),wave=sin(lakeUv.x*.11+lakeTime*.6)*sin(lakeUv.y*.13-lakeTime*.45);
     diffuseColor.rgb=mix(vec3(.025,.26,.29),vec3(.27,.61,.49),smoothstep(.35,1.0,q))*(1.0+.035*wave);
@@ -71,7 +81,7 @@ export function installClearLake(root,{point,polar,bedRadius,frame,waterRadius,m
   };grassMat.customProgramCacheKey=()=> 'lake-seagrass-v1';
   const coralMats=['#bc8874','#b99c64','#9d8baa','#799e8c'].map(color=>new T.MeshLambertMaterial({color}));
   let grassClumps=0,corals=0;
-  for(let i=0;i<420;i++){
+  for(let i=0;i<210;i++){
     const angle=random()*Math.PI*2,q=.28+Math.sqrt(random())*.60,[x,z]=polar(angle,q),base=bedRadius(q)+.20;
     if(Math.abs(x-28)<18&&z>25)continue;
     const depth=waterRadius-base,h=Math.min(depth*.64,2.2+random()*3.2),mat=frame(x,z,base);
@@ -88,7 +98,7 @@ export function installClearLake(root,{point,polar,bedRadius,frame,waterRadius,m
     const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(p,3));g.setAttribute('color',new T.Float32BufferAttribute(color,3));g.setAttribute('sway',new T.Float32BufferAttribute(sway,1));g.computeVertexNormals();batch(g,grassMat,mat);grassClumps++;positions.push({x,z,base,height:h,kind:'grass'});
   }
   function branch(a,b,r,mat,matrix){const delta=b.clone().sub(a),g=new T.CylinderGeometry(r*.5,r,delta.length(),5,1);g.applyQuaternion(new T.Quaternion().setFromUnitVectors(new T.Vector3(0,1,0),delta.normalize()));g.translate(...a.clone().add(b).multiplyScalar(.5).toArray());batch(g,mat,matrix);}
-  for(let i=0;i<64;i++){
+  for(let i=0;i<32;i++){
     const angle=random()*Math.PI*2,q=.32+random()*.46,[x,z]=polar(angle,q),base=bedRadius(q)+.22,h=Math.min(3.2+random()*1.6,(waterRadius-base)*.70-.65),matrix=frame(x,z,base),mat=coralMats[i%4];
     for(let k=0;k<5;k++){
       const a=k/5*Math.PI*2+random(),end=new T.Vector3(Math.cos(a)*h*.42,h*(.5+random()*.5),Math.sin(a)*h*.42);
