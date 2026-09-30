@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {loadPanda, PANDA_URL} from './panda-character.js?v=20260930-27';
+import {loadPanda, PANDA_URL} from './panda-character.js?v=20260930-28';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { createAtmosphere, createDriftingSeeds } from './atmosphere.js?v=20260928';
@@ -2360,7 +2360,7 @@ async function boot() {
   boy.pivot.add(boyRoot);
   boy.mixer = new THREE.AnimationMixer(boyRoot);
 
-  // Keep all six supplied GLB clips intact, including their original hip motion.
+  // Only sit is replaced with a fixed handlebar pose; the other GLB clips stay intact.
   for (const clip of boyRoot.animations) boy.actions[clip.name] = boy.mixer.clipAction(clip);
 
   /* 用骑坐姿势下的骨盆高度对齐座垫，避免人浮在车上或陷进车里 */
