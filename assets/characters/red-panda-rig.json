@@ -1,0 +1,15 @@
+{
+  "vertices": 9285,
+  "triangles": 18528,
+  "bones": 22,
+  "animations": [
+    "idle",
+    "jump",
+    "run",
+    "sit",
+    "swim",
+    "walk"
+  ],
+  "unweighted": 0,
+  "maxInfluences": 3
+}

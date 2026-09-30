@@ -3,7 +3,7 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { createAtmosphere, createDriftingSeeds } from './atmosphere.js?v=20260928';
 import { decodeRoadGeometry, installRoadGeometry, installJunctionFurniture } from './road-geometry.js?v=20260928-4';
-import { createLakeside, isLakeWater, lakePoint } from './lakeside.js?v=20260930-22';
+import { createLakeside, isLakeWater, lakePoint, LAKE_WATER } from './lakeside.js?v=20260930-22';
 import { reduceSceneDensity } from './scene-density.js?v=20260929-9';
 import { raiseGrassLevel } from './grass-level.js?v=20260930-22';
 import { createCollisionWorld, sweepSphere } from './collision-world.js?v=20260929-15';
@@ -923,6 +923,12 @@ function cellOf(d, w, h) {
 function groundR(dir) {
   return GRID.ground ? GRID.ground[cellOf(dir, GRID.gw, GRID.gh)] : PLANET.R;
 }
+// Lake meshes are centered on world origin; the sampled terrain center can
+// differ slightly. Intersect its radial frame with the actual water sphere.
+function waterSurfaceR(dir) {
+  const offset = PLANET.C.dot(dir);
+  return -offset + Math.sqrt(offset * offset + LAKE_WATER * LAKE_WATER - PLANET.C.lengthSq());
+}
 function blockedDir(dir) {
   if (isLakeWater(_lakeWorld.copy(dir).multiplyScalar(600).add(PLANET.C))) return true;
   return collisionWorld?.blocked(dir) || false;
@@ -1268,9 +1274,10 @@ function horizonCull(q) {
 
 /* ---------- 碰撞查询 ---------- */
 const _blU = new THREE.Vector3(), _blF = new THREE.Vector3(), _blR = new THREE.Vector3(), _blT = new THREE.Vector3();
-function blockedAt(q, r = CFG.bikeRadius) {
+function blockedAt(q, r = CFG.bikeRadius, allowWater = false) {
   fUp(q, _blU);
   if (collisionWorld?.blocked(_blU, r)) return true;
+  if (allowWater) return false;
   if (isLakeWater(_lakeWorld.copy(_blU).multiplyScalar(600).add(PLANET.C))) return true;
   fFwd(q, _blF); fRight(q, _blR);
   for (let i = 0; i < 8; i++) {
@@ -1484,7 +1491,7 @@ const walkerRig = new THREE.Group();
 walkerRig.rotation.y = -Math.PI / 2;
 walker.add(walkerRig);
 
-const foot = { speed: 0, vy: 0, air: false, h: 0, q: new THREE.Quaternion(), camOff: 0 };
+const foot = { speed: 0, vy: 0, air: false, swimming: false, h: 0, q: new THREE.Quaternion(), camOff: 0 };
 
 /* ---------- 骨骼动画 ---------- */
 const boy = { pivot: null, mixer: null, actions: {}, cur: '', seat: new THREE.Vector3() };
@@ -1554,7 +1561,7 @@ function dismount() {
   foot.h = 0;
   foot.gr = undefined;                 // 换了位置，别从车的地表半径插值过来
   foot.camOff = 0;
-  foot.speed = 0; foot.vy = 0; foot.air = false;
+  foot.speed = 0; foot.vy = 0; foot.air = false; foot.swimming = false;
   syncBody(walker, foot.q, 0, foot, 1);
   walker.visible = true;
   boy.cur = '';
@@ -1565,6 +1572,7 @@ function dismount() {
 
 function mount() {
   if (state.onBike || !boy.pivot) return;
+  if (foot.swimming) { toast('先游回岸边再上车'); return; }
   if (walker.position.distanceTo(player.position) > CFG.mountRange) { toast('走到电动车旁再上车'); return; }
   state.onBike = true;
   walker.visible = false;
@@ -1868,6 +1876,7 @@ const _sbU = new THREE.Vector3();
 function syncBody(obj, q, h, ent, k) {
   fUp(q, _sbU);
   let gr = groundR(_sbU);
+  if (ent === foot && ent.swimming) gr = waterSurfaceR(_sbU) - 0.65 * S;
   if (ent) {
     if (ent.gr === undefined || Math.abs(gr - ent.gr) > 8) ent.gr = gr;
     else ent.gr += (gr - ent.gr) * k;
@@ -1878,8 +1887,8 @@ function syncBody(obj, q, h, ent, k) {
 }
 
 /* 撞墙时沿墙滑行：朝斜前方试着挪一点，但朝向不变。返回是否畅通 */
-function slide(q, out, step, r) {
-  return sweepSphere(q, out, step, r, PLANET.R, blockedAt);
+function slide(q, out, step, r, allowWater = false) {
+  return sweepSphere(q, out, step, r, PLANET.R, allowWater ? (q, r) => blockedAt(q, r, true) : blockedAt);
 }
 /* ?auto 时自动朝任务点打方向，用来无人值守跑一遍「取信 -> 送达」全流程 */
 const _asU = new THREE.Vector3(), _asF = new THREE.Vector3();
@@ -1982,7 +1991,7 @@ function updateFoot(dt) {
   let mag = Math.min(1, moveDir.length());
   if (mag > 0.08) {
     moveDir.addScaledVector(_ftU, -moveDir.dot(_ftU)).normalize();
-    const target = (running ? CFG.runSpeed : CFG.walkSpeed) * mag;
+    const target = (foot.swimming ? (running ? 2.2 : 1.35) * S : running ? CFG.runSpeed : CFG.walkSpeed) * mag;
     foot.speed += (target - foot.speed) * Math.min(1, dt * 9);
     fFwd(foot.q, _ftF);
     const dh = Math.atan2(_ftC.crossVectors(_ftF, moveDir).dot(_ftU), _ftF.dot(moveDir));
@@ -1997,7 +2006,7 @@ function updateFoot(dt) {
 
   if (jumpQueued) {
     jumpQueued = false;
-    if (!foot.air) {
+    if (!foot.air && !foot.swimming) {
       foot.air = true;
       foot.vy = CFG.jumpVel;
       boy.cur = '';
@@ -2005,8 +2014,15 @@ function updateFoot(dt) {
     }
   }
 
-  if (!slide(foot.q, _ftQ, foot.speed * dt, CFG.footRadius)) foot.speed *= 0.3;
+  if (!slide(foot.q, _ftQ, foot.speed * dt, CFG.footRadius, true)) foot.speed *= 0.3;
   foot.q.copy(_ftQ);
+  fUp(foot.q, _ftU);
+  const inWater = isLakeWater(_lakeWorld.copy(_ftU).multiplyScalar(600).add(PLANET.C));
+  const swimming = inWater && waterSurfaceR(_ftU) - groundR(_ftU) > (foot.swimming ? .58 : .68) * S;
+  if (swimming !== foot.swimming) {
+    foot.swimming = swimming;
+    if (swimming) { foot.air = false; foot.vy = 0; foot.h = 0; toast('开始游泳 · 摇杆划水，油门加速'); }
+  }
 
   /* 高度只在「离地」这一维上算重力，方向由 frame 的本地 up 给出 */
   if (foot.air) {
@@ -2024,7 +2040,8 @@ function updateFoot(dt) {
   syncBody(walker, foot.q, foot.h, foot, Math.min(1, dt * 10));
 
   if (!foot.air) {
-    if (foot.speed > CFG.walkSpeed * 1.15) playAnim('run', { fade: 0.16, speed: clamp(foot.speed / CFG.runSpeed, 0.65, 1.5) });
+    if (foot.swimming) playAnim('swim', { fade: .25, speed: foot.speed > .2 ? clamp(foot.speed / (1.35 * S), .7, 1.4) : .55 });
+    else if (foot.speed > CFG.walkSpeed * 1.15) playAnim('run', { fade: 0.16, speed: clamp(foot.speed / CFG.runSpeed, 0.65, 1.5) });
     else if (foot.speed > 0.2) playAnim('walk', { fade: 0.16, speed: clamp(foot.speed / CFG.walkSpeed, 0.5, 1.6) });
     else playAnim('idle', { fade: 0.2 });
   }
@@ -2357,12 +2374,12 @@ async function boot() {
   const carRoot = await loadOne('./assets/car-city.fbx', f => setProgress(0.78 + f * 0.06));
   buildCars(carRoot, atlas);
 
-  setProgress(0.85, '加载骑手…');
-  const boyRoot = await loadOne('./assets/boy-final.fbx');
+  setProgress(0.85, '加载小熊猫与骨骼动作…');
+  const boyRoot = await loadOne('./assets/characters/red-panda-v1.fbx');
   normalize(boyRoot, { height: CFG.riderHeight });
-  toonify(boyRoot, { map: inkTexture(await loadTex('./assets/boy-final_basecolor.jpg'), { threshold: 0.16 }) });
-  boyRoot.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
-  addOutline(boyRoot, 0.013 * S);
+  const pandaMap = await loadTex('./assets/characters/red-panda-color-v1.jpg');
+  const pandaMaterial = new THREE.MeshLambertMaterial({ map: pandaMap, color: 0xffffff });
+  boyRoot.traverse(o => { if (o.isMesh) { o.material = pandaMaterial; o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; } });
 
   boy.pivot = new THREE.Group();
   boy.pivot.add(boyRoot);
@@ -2373,7 +2390,8 @@ async function boot() {
   const walkClip = clipOf('walk');
   const runClip = clipOf('run');
   const jumpClip = clipOf('jump');
-  const waitClip = clipOf('wait');
+  const waitClip = clipOf('idle');
+  const swimClip = clipOf('swim');
   if (walkClip) stripRootMotion(walkClip);
   if (runClip) stripRootMotion(runClip);
   if (jumpClip) stripRootMotion(jumpClip);
@@ -2389,6 +2407,10 @@ async function boot() {
   }
   if (runClip) boy.actions.run = boy.mixer.clipAction(runClip);
   if (jumpClip) boy.actions.jump = boy.mixer.clipAction(jumpClip);
+  if (swimClip) boy.actions.swim = boy.mixer.clipAction(swimClip);
+  for (const name of ['idle', 'sit', 'walk', 'run', 'swim', 'jump']) {
+    if (!boy.actions[name]) throw new Error('小熊猫动作缺失：' + name);
+  }
 
   /* 用骑坐姿势下的骨盆高度对齐座垫，避免人浮在车上或陷进车里 */
   scene.add(boy.pivot);
@@ -2398,7 +2420,8 @@ async function boot() {
   boy.pivot.updateMatrixWorld(true);
   const pelvis = boyRoot.getObjectByName('Pelvis') || boyRoot.getObjectByName('Hip');
   const pelvisY = pelvis ? pelvis.getWorldPosition(new THREE.Vector3()).y : CFG.riderHeight * 0.5;
-  boy.seat.set(-0.10 * S, bikeSize.y * 0.60 - pelvisY, 0);
+  const pelvisX = pelvis ? pelvis.getWorldPosition(new THREE.Vector3()).x : 0;
+  boy.seat.set(-0.10 * S - pelvisX, bikeSize.y * 0.60 - pelvisY, 0);
   scene.remove(boy.pivot);
   riderHolder.add(boy.pivot);
   boy.pivot.position.copy(boy.seat);
@@ -2450,6 +2473,12 @@ async function boot() {
 
   initTraffic(IS_MOBILE ? 4 : 6);
   if (/(\?|&)foot/.test(location.search)) dismount();
+  if (DEBUG && new URLSearchParams(location.search).has('pandatest')) {
+    const { verifyPandaGame } = await import('./tools/panda-game-check.js');
+    verifyPandaGame({T:THREE,foot,state,boy,walker,player,PLANET,S,CFG,keys,camera,
+      updateFoot,updateCamera,syncBody,dismount,mount,blockedAt,frameFromDir,turn,
+      queueJump:()=>{jumpQueued=true;}});
+  }
 
   syncHud();
   nextTask();
