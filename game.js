@@ -1542,7 +1542,7 @@ function dismount() {
   foot.speed = 0; foot.vy = 0; foot.air = false; foot.swimming = false;
   syncBody(walker, foot.q, 0, foot, 1);
   walker.visible = true;
-  boy.cur = '';
+  // Preserve the previous action so playAnim can fade the riding pose out.
   playAnim('idle', { fade: 0.12 });
   setRideBtn();
   toast('下车 · 摇杆走，油门跑，刹车跳');
@@ -1556,7 +1556,7 @@ function mount() {
   walker.visible = false;
   riderHolder.add(boy.pivot);
   boy.pivot.position.copy(boy.seat);
-  boy.cur = '';
+  // Fade out the on-foot action when returning to the saddle.
   playAnim('sit', { fade: 0.15 });
   setRideBtn();
   toast('上车 · 油门加速，刹车减速');
