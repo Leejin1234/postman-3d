@@ -1,6 +1,6 @@
 {
-  "name": "小邮差 · 3D",
-  "short_name": "小邮差",
+  "name": "小熊快送 · 今日必达",
+  "short_name": "小熊快送",
   "description": "骑电动车穿过卡通小城送信的 3D 网页小游戏",
   "start_url": "./index.html",
   "scope": "./",
