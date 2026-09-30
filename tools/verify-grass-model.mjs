@@ -7,7 +7,7 @@ const bytes = fs.readFileSync(new URL('../assets/trees/grass-v1.fbx', import.met
 const model = loadGrassModel(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), new T.Texture());
 const geo = model.geometry, box = geo.boundingBox;
 assert.ok(geo.attributes.position.count > 0);
-assert.ok(Math.abs(box.min.y) < 1e-5 && Math.abs(box.max.y - 1.155) < 1e-4);
+assert.ok(Math.abs(box.min.y) < 1e-5 && Math.abs(box.max.y - 1.2705) < 1e-4);
 assert.ok(geo.attributes.color && geo.attributes.color.count === geo.attributes.position.count);
 assert.equal(model.material.name, 'HeartTownGrass');
 assert.equal(model.material.alphaTest, .28);

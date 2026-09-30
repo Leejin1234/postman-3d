@@ -20,7 +20,7 @@ export function loadGrassModel(buffer, texture) {
   geometry.translate(-center.x, -center.y, -center.z);
   // The source is authored in millimetres. Fit the supplied silhouette to the
   // existing meadow blade height while keeping its broad, soft shape.
-  geometry.scale(1.155 / size.y, 1.155 / size.y, 1.155 / size.y);
+  geometry.scale(1.2705 / size.y, 1.2705 / size.y, 1.2705 / size.y);
   geometry.computeBoundingBox(); geometry.computeBoundingSphere();
   if (texture) { texture.colorSpace = T.NoColorSpace; texture.wrapS = texture.wrapT = T.ClampToEdgeWrapping; texture.needsUpdate = true; }
   const material = new T.MeshLambertMaterial({
@@ -107,10 +107,12 @@ function bladeGeometry(stem = false) {
 }
 
 export function createMeadowPlants(scene, field, { mobile = false, model = null } = {}) {
-  const range = mobile ? 110 : 150;
+  const range = mobile ? 330 : 450;
   // grass.fbx is a rounded multi-blade clump (220 triangles), so using the
   // old single-blade capacity would multiply the scene cost unnecessarily.
-  const capacity = model ? (mobile ? 750 : 1750) : (mobile ? 28000 : 64000);
+  // Area grows by 3x in each dimension while density is reduced by 60%.
+  // Scale the cap accordingly so the wider ring actually gets populated.
+  const capacity = model ? (mobile ? 2700 : 6300) : (mobile ? 28000 : 64000);
   const uniforms = { meadowTime: { value: 0 }, meadowFocus: { value: new T.Vector3() }, meadowRange: { value: range } };
   function material(flower = false) {
     const mat = flower ? new T.MeshBasicMaterial({ color: 0xffffff, side: T.DoubleSide })
