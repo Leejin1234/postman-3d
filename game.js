@@ -2093,9 +2093,11 @@ function updateCamera(dt) {
   }
   const base = state.onBike ? 9.0 * S + Math.abs(state.speed) * 0.11 : 7.2 * S + foot.speed * 0.2;
   const back = cameraDistance(base);
-  const high = (state.onBike ? 4.3 : 3.0) * S;
+  // Lower the bike camera slightly and aim a little behind the rider so the
+  // character sits nearer the middle of the mobile frame.
+  const high = (state.onBike ? 3.7 : 3.0) * S;
   camGoal.copy(p).addScaledVector(_cDir, -back).addScaledVector(_cUp, high + back * 0.22);
-  lookGoal.copy(p).addScaledVector(_cDir, (state.onBike ? 3.0 : 4.2) * S).addScaledVector(_cUp, (state.onBike ? 1.3 : 1.1) * S);
+  lookGoal.copy(p).addScaledVector(_cDir, (state.onBike ? -0.8 : 4.2) * S).addScaledVector(_cUp, 1.1 * S);
   camera.position.lerp(camGoal, Math.min(1, dt * (state.onBike ? 6 : 7)));
   camera.lookAt(lookGoal);
 }

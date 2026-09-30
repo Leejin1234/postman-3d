@@ -107,7 +107,9 @@ button:focus-visible,[role=button]:focus-visible { outline:2px solid #557b68; ou
   .tasktxt span { max-width:175px; font-size:9px; }.taskarrow { display:none; }
   #mini { top:94px; right:16px; width:82px; height:82px; }
   .compass { top:185px; right:16px; width:82px; }
-  .view-controls { top:auto; bottom:187px; }
+  .view-controls { top:calc(82px + env(safe-area-inset-top)); bottom:auto; }
+  .taskbar, #mini { top:calc(146px + env(safe-area-inset-top)); }
+  .compass { top:calc(236px + env(safe-area-inset-top)); }
   .bottom { bottom:30px; }.bbtn,.bbtn.img { width:75px; height:30px; }
   #btnQuiet { bottom:6px; padding:3px 10px; font-size:9px; }
   .stick { left:20px; bottom:84px; width:80px; height:80px; }
@@ -172,11 +174,11 @@ button:focus-visible,[role=button]:focus-visible { outline:2px solid #557b68; ou
   .mobile-ui .gas,.mobile-ui .gas.img { bottom:calc(125px + env(safe-area-inset-bottom)); }
   .mobile-ui .brake,.mobile-ui .brake.img { bottom:calc(134px + env(safe-area-inset-bottom)); }
   .mobile-ui #btnRide { bottom:calc(222px + env(safe-area-inset-bottom)); }
-  .mobile-ui .view-controls { top:auto; bottom:calc(286px + env(safe-area-inset-bottom)); }
+  .mobile-ui .view-controls { top:calc(82px + env(safe-area-inset-top)); bottom:auto; }
   .mobile-ui .speed { bottom:calc(228px + env(safe-area-inset-bottom)); left:20px; }
-  .mobile-ui .taskbar { top:88px; left:12px; max-width:calc(100% - 118px); }
-  .mobile-ui #mini { right:12px; top:88px; }
-  .mobile-ui .compass { right:12px; top:178px; }
+  .mobile-ui .taskbar { top:calc(146px + env(safe-area-inset-top)); left:12px; max-width:calc(100% - 118px); }
+  .mobile-ui #mini { right:12px; top:calc(146px + env(safe-area-inset-top)); }
+  .mobile-ui .compass { right:12px; top:calc(236px + env(safe-area-inset-top)); }
 }
 @media (orientation:landscape) {
   .mobile-ui .panel .cell { aspect-ratio:auto; min-height:64px; }
