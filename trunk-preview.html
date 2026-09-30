@@ -1,0 +1,19 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><title>木纹树干与树冠检查</title>
+<style>body{margin:0;background:#d9e4d9;font:14px sans-serif}nav{position:fixed;top:18px;left:20px;background:#fffddd;padding:12px;border-radius:8px}button{padding:8px;margin-left:8px}</style>
+<script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
+<nav>左：原始树干模型　中、右：现有树冠与新树干<button id="rotate">转动视角</button></nav>
+<script type="module">
+import * as T from 'three';
+import {loadTreeTrunk,buildStylizedTree,createTreeMaterial} from './stylized-trees.js?v=20260930-30';
+const trunk=await loadTreeTrunk();
+const renderer=new T.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);document.body.append(renderer.domElement);
+renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1;
+const scene=new T.Scene();scene.background=new T.Color('#d9e4d9');
+scene.add(new T.HemisphereLight(0xffffff,0x777766,2));const sun=new T.DirectionalLight(0xfff0dd,2.4);sun.position.set(2,4,3);scene.add(sun);
+const mat=createTreeMaterial(trunk.texture),group=new T.Group();scene.add(group);
+for(let i=0;i<3;i++){const g=i===0?trunk.geometry:buildStylizedTree(817+i*397,i===2?4:1,trunk.geometry).geometry;const tree=new T.Mesh(g,mat);tree.position.x=(i-1)*1.1;group.add(tree);}
+const floor=new T.Mesh(new T.PlaneGeometry(100,100),new T.MeshLambertMaterial({color:0x99af7b}));floor.rotation.x=-Math.PI/2;floor.position.y=-.003;scene.add(floor);
+const camera=new T.PerspectiveCamera(35,innerWidth/innerHeight,.01,100);camera.position.set(0,1.05,4.3);camera.lookAt(0,.55,0);
+document.querySelector('#rotate').onclick=()=>group.children.forEach(t=>t.rotation.y+=Math.PI/4);
+renderer.setAnimationLoop(()=>{renderer.setSize(innerWidth,innerHeight,false);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.render(scene,camera)});
+</script></html>

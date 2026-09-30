@@ -1,5 +1,46 @@
 import * as T from 'three';
 import { mergeGeometries } from './vendor/utils/BufferGeometryUtils.js';
+import { GLTFLoader } from './vendor/loaders/GLTFLoader.js';
+
+export const TREE_TRUNK_URL = './assets/trees/wooden-trunk-v1.glb';
+export async function loadTreeTrunk(buffer) {
+  const gltf = buffer
+    ? await new GLTFLoader().parseAsync(buffer, './assets/trees/')
+    : await new GLTFLoader().loadAsync(TREE_TRUNK_URL);
+  return prepareTreeTrunk(gltf.scene);
+}
+
+export function prepareTreeTrunk(root) {
+  root.updateMatrixWorld(true);
+  const meshes = []; root.traverse(o => { if (o.isMesh) meshes.push(o); });
+  if (meshes.length !== 1 || Array.isArray(meshes[0].material)) throw new Error('树干模型需要单一网格和材质');
+  const mesh = meshes[0], geometry = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
+  geometry.applyMatrix4(mesh.matrixWorld);
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox, height = box.max.y - box.min.y;
+  if (!(height > 0)) throw new Error('树干模型高度无效');
+  // Center the root, not the asymmetric branch canopy, and fit its tips inside
+  // the existing foliage. Uniform scaling preserves the supplied silhouette.
+  const p = geometry.attributes.position, base = new T.Vector3(); let count = 0;
+  for (let i=0;i<p.count;i++) if (p.getY(i)<box.min.y+height*.04) { base.add(new T.Vector3(p.getX(i),0,p.getZ(i))); count++; }
+  base.divideScalar(count);
+  geometry.translate(-base.x,-box.min.y,-base.z);
+  geometry.scale(.88/height,.88/height,.88/height);
+  geometry.rotateY(Math.PI/2);
+  const uv = geometry.attributes.uv;
+  if (!uv || !mesh.material.map) throw new Error('树干模型缺少木纹贴图或 UV');
+  // Negative U tags bark for a shared bark/foliage shader, retaining one draw
+  // call per tree and the model's original texture coordinates.
+  for(let i=0;i<uv.count;i++) uv.setX(i,-3-uv.getX(i));
+  const colors = new Float32Array(p.count*3), color = mesh.material.color;
+  for(let i=0;i<p.count;i++) colors.set(color.toArray(),i*3);
+  geometry.setAttribute('color',new T.Float32BufferAttribute(colors,3));
+  for(const name of Object.keys(geometry.attributes)) if(!['position','normal','uv','color'].includes(name)) geometry.deleteAttribute(name);
+  geometry.computeBoundingBox(); geometry.computeBoundingSphere();
+  let baseRadius = 0;
+  for(let i=0;i<p.count;i++) if(p.getY(i)<.025) baseRadius=Math.max(baseRadius,Math.hypot(p.getX(i),p.getZ(i)));
+  return {geometry,texture:mesh.material.map,baseRadius};
+}
 
 const hash = name => { let h = 2166136261; for (const ch of name) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return h >>> 0; };
 
@@ -13,7 +54,7 @@ function getLeafMask(index) {
 }
 
 // Rei's rounded leaf-cluster mask is shared by the visible and shadow passes.
-function reiLeaves(material) {
+function reiLeaves(material, barkTexture = null) {
   material.onBeforeCompile = shader => {
     shader.uniforms.reiLeafMaskA = {value:getLeafMask(0)};
     shader.uniforms.reiLeafMaskB = {value:getLeafMask(1)};
@@ -27,17 +68,23 @@ function reiLeaves(material) {
       }`);
     // Leaf cards inherit the crown normal on both sides, avoiding dark back-face rims.
     shader.fragmentShader=shader.fragmentShader.replace('#include <normal_fragment_begin>',T.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;','normal *= leafDiskUv.x > -1.5 ? 1.0 : faceDirection;'));
+    if (barkTexture && material.isMeshLambertMaterial) {
+      shader.uniforms.treeBarkMap = {value:barkTexture};
+      shader.fragmentShader = 'uniform sampler2D treeBarkMap;\n' + shader.fragmentShader;
+      shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>',
+        '#include <color_fragment>\nif (leafDiskUv.x <= -2.5) diffuseColor *= texture2D(treeBarkMap, vec2(-3.0-leafDiskUv.x,leafDiskUv.y));');
+    }
   };
-  material.customProgramCacheKey = () => 'rei-two-leaf-masks-v2';
+  material.customProgramCacheKey = () => `rei-two-leaf-masks-bark-v3-${!!barkTexture}`;
   return material;
 }
 
-export function createTreeMaterial() {
-  return reiLeaves(new T.MeshLambertMaterial({vertexColors:true,side:T.DoubleSide}));
+export function createTreeMaterial(barkTexture = null) {
+  return reiLeaves(new T.MeshLambertMaterial({vertexColors:true,side:T.DoubleSide}), barkTexture);
 }
 
 // Rei_treeLeavesGN: a smooth inner crown with outward-facing masked leaf clusters.
-export function buildStylizedTree(seed = 1, stride = 1) {
+export function buildStylizedTree(seed = 1, stride = 1, trunkGeometry = null) {
   const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
   const parts = [], leafPositions = [], leafNormals = [], leafColors = [], leafUvs = [];
   const bark = new T.Color('#65554a'), barkLight = new T.Color('#877260');
@@ -54,12 +101,14 @@ export function buildStylizedTree(seed = 1, stride = 1) {
     geo.setAttribute('uv',new T.Float32BufferAttribute(new Float32Array(geo.attributes.position.count*2).fill(-2),2));
     geo.setAttribute('color', new T.Float32BufferAttribute(colors, 3)); parts.push(geo);
   }
+  if (!trunkGeometry) {
   branch([0, 0, 0], [.035, .29, -.012], .049, .034);
   branch([.035, .28, -.012], [-.035, .49, .025], .035, .024);
   branch([-.035, .47, .025], [-.16, .69, .015], .024, .009);
   branch([-.005, .39, .014], [.17, .55, -.035], .025, .017);
   branch([.17, .54, -.035], [.21, .77, -.015], .017, .006);
   branch([-.045, .48, .02], [-.045, .73, .16], .021, .007);
+  }
   const crowns = [[-.20,.70,0,.25,.20,.23],[.22,.77,-.015,.25,.22,.24],[-.035,.94,.015,.24,.23,.23],[-.03,.74,.21,.23,.18,.23],[.015,.72,-.20,.24,.19,.23]];
   const dark = new T.Color('#23735c'), mid = new T.Color('#60a955'), light = new T.Color('#a9cd67');
   const foliageColor = (y,n) => {
@@ -112,20 +161,20 @@ export function buildStylizedTree(seed = 1, stride = 1) {
   leaves.setAttribute('normal',new T.Float32BufferAttribute(leafNormals,3));
   leaves.setAttribute('color',new T.Float32BufferAttribute(leafColors,3));
   leaves.setAttribute('uv',new T.Float32BufferAttribute(leafUvs,2));
-  const trunk = mergeGeometries(parts, false), geometry = mergeGeometries([trunk,...cores,leaves], false);
+  const trunk = trunkGeometry ? trunkGeometry.clone() : mergeGeometries(parts, false), geometry = mergeGeometries([trunk,...cores,leaves], false);
   geometry.userData.coreTriangles=cores.reduce((n,g)=>n+g.attributes.position.count/3,0);
   for (const part of [...parts,...cores,leaves]) part.dispose();
   geometry.computeBoundingBox(); geometry.computeBoundingSphere();
   return { geometry, trunk };
 }
 
-export function replaceStylizedTrees(city, { mobile = false } = {}) {
+export function replaceStylizedTrees(city, { mobile = false, trunkAsset = null } = {}) {
   city.updateMatrixWorld(true);
   const trees = []; city.traverse(o => { if (o.isMesh && /^Tree_/.test(o.name)) trees.push(o); });
-  const variants = Array.from({length:6}, (_, i) => buildStylizedTree(817 + i * 397, mobile ? 2 : 1));
-  const distant = Array.from({length:6}, (_, i) => buildStylizedTree(817 + i * 397, 4));
+  const variants = Array.from({length:6}, (_, i) => buildStylizedTree(817 + i * 397, mobile ? 2 : 1, trunkAsset?.geometry));
+  const distant = Array.from({length:6}, (_, i) => buildStylizedTree(817 + i * 397, 4, trunkAsset?.geometry));
   const profiles = new Map();
-  const material = createTreeMaterial();
+  const material = createTreeMaterial(trunkAsset?.texture);
   const depthMaterial = reiLeaves(new T.MeshDepthMaterial({depthPacking:T.RGBADepthPacking,side:T.DoubleSide}));
   material.name = 'StylizedTree';
   const point = new T.Vector3(), pivot = new T.Vector3(), up = new T.Vector3(), local = new T.Vector3();
@@ -150,7 +199,7 @@ export function replaceStylizedTrees(city, { mobile = false } = {}) {
     const height = T.MathUtils.clamp(top-bottom,22,48);
     const width = height * (.88 + (id % 101) / 500);
     // Preserve narrow street-tree bases instead of widening their collision footprint.
-    const ratio = Math.min(1, Math.max(.3,oldTrunkRadius) / (.049 * width));
+    const ratio = Math.min(1, Math.max(.3,oldTrunkRadius) / ((trunkAsset?.baseRadius || .049) * width));
     const trunkScale = Math.max(.1,Math.floor(ratio * 10)/10), profileKey = `${id % variants.length}:${trunkScale}`;
     if (!profiles.has(profileKey)) {
       const geo = variant.geometry.clone(), trunk = variant.trunk.clone(), far = distant[id % variants.length].geometry.clone();
@@ -162,6 +211,12 @@ export function replaceStylizedTrees(city, { mobile = false } = {}) {
           p.setX(i,p.getX(i)*(1-blend+blend*trunkScale)); p.setZ(i,p.getZ(i)*(1-blend+blend*trunkScale));
         }
         g.computeBoundingBox(); g.computeBoundingSphere();
+      }
+      if (trunkAsset) {
+        trunk.computeVertexNormals();
+        for (const g of [geo,far]) {
+          g.attributes.normal.array.set(trunk.attributes.normal.array,0);
+        }
       }
       profiles.set(profileKey,{geometry:geo,trunk,far});
     }
@@ -180,5 +235,5 @@ export function replaceStylizedTrees(city, { mobile = false } = {}) {
   }
   for(const variant of [...variants,...distant]){variant.geometry.dispose();variant.trunk.dispose();}
   city.updateMatrixWorld(true);
-  return { trees:trees.length,oldTriangles,triangles:trees.reduce((n,t)=>n+t.geometry.attributes.position.count/3,0),variants:6,sharedGeometries:profiles.size };
+  return { trees:trees.length,oldTriangles,triangles:trees.reduce((n,t)=>n+t.geometry.attributes.position.count/3,0),variants:6,sharedGeometries:profiles.size,trunkModel:trunkAsset ? TREE_TRUNK_URL : 'procedural' };
 }

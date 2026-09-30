@@ -11,7 +11,7 @@ import { createCollisionWorld, sweepSphere } from './collision-world.js?v=202609
 import { installSurfaceMaterials } from './surface-materials.js?v=20260929-11';
 import { installSoftTerrain, smoothTerrainNormals } from './soft-terrain.js?v=20260929-11';
 import { scatterMeadow, createMeadowPlants } from './meadow-plants.js?v=20260930-22';
-import { replaceStylizedTrees } from './stylized-trees.js?v=20260929-19';
+import { replaceStylizedTrees, loadTreeTrunk, TREE_TRUNK_URL } from './stylized-trees.js?v=20260930-30';
 import { roundSceneRocks } from './rounded-rocks.js?v=20260929-19';
 import { installFloatingStick } from './floating-stick.js?v=20260929-16';
 
@@ -2298,7 +2298,9 @@ async function boot() {
   if (DEBUG) console.info('Scene density:', density);
   const grassLevel = raiseGrassLevel(city);
   if (DEBUG) console.info('Grass level:', grassLevel);
-  const trees = replaceStylizedTrees(city, { mobile: IS_MOBILE });
+  setProgress(0.58, '种下木纹树干…');
+  const trunkAsset = await withRetry(TREE_TRUNK_URL, async () => loadTreeTrunk(await fetchAsset(TREE_TRUNK_URL)));
+  const trees = replaceStylizedTrees(city, { mobile: IS_MOBILE, trunkAsset });
   if (DEBUG) console.info('Stylized trees:', trees);
   const rocks = roundSceneRocks(city);
   if (DEBUG) console.info('Rounded rocks:', rocks);
