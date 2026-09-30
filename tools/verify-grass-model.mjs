@@ -11,4 +11,5 @@ assert.ok(Math.abs(box.min.y) < 1e-5 && Math.abs(box.max.y - 1.2705) < 1e-4);
 assert.ok(geo.attributes.color && geo.attributes.color.count === geo.attributes.position.count);
 assert.equal(model.material.name, 'HeartTownGrass');
 assert.equal(model.material.alphaTest, .28);
-console.log(JSON.stringify({result:'PASS',vertices:geo.attributes.position.count,height:+(box.max.y-box.min.y).toFixed(3),sourceSize:model.sourceSize,texture:'grass-v1-mask.png'},null,2));
+assert.ok(model.farGeometry.attributes.position.count > 0 && model.farGeometry.attributes.position.count < geo.attributes.position.count);
+console.log(JSON.stringify({result:'PASS',vertices:geo.attributes.position.count,farVertices:model.farGeometry.attributes.position.count,height:+(box.max.y-box.min.y).toFixed(3),sourceSize:model.sourceSize,texture:'grass-v1-mask.png'},null,2));

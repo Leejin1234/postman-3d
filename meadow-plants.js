@@ -35,7 +35,27 @@ export function loadGrassModel(buffer, texture) {
     c.copy(bottom).lerp(top, t); colors.set(c.toArray(), i * 3);
   }
   geometry.setAttribute('color', new T.Float32BufferAttribute(colors, 3));
-  return { geometry, material, sourceSize: size.toArray() };
+  // Keep a quarter of the source triangles for the distant ring. It uses the
+  // same UV mask and gradient, but cuts far-field vertex work substantially.
+  const farPositions = [], farNormals = [], farUvs = [], farColors = [];
+  const normal = geometry.attributes.normal, uv = geometry.attributes.uv, colorAttr = geometry.attributes.color;
+  for (let tri = 0; tri < pos.count / 3; tri++) {
+    if (tri % 4 !== 0) continue;
+    for (let k = 0; k < 3; k++) {
+      const i = tri * 3 + k;
+      farPositions.push(pos.getX(i), pos.getY(i), pos.getZ(i));
+      if (normal) farNormals.push(normal.getX(i), normal.getY(i), normal.getZ(i));
+      if (uv) farUvs.push(uv.getX(i), uv.getY(i));
+      farColors.push(colorAttr.getX(i), colorAttr.getY(i), colorAttr.getZ(i));
+    }
+  }
+  const farGeometry = new T.BufferGeometry();
+  farGeometry.setAttribute('position', new T.Float32BufferAttribute(farPositions, 3));
+  if (farNormals.length) farGeometry.setAttribute('normal', new T.Float32BufferAttribute(farNormals, 3));
+  if (farUvs.length) farGeometry.setAttribute('uv', new T.Float32BufferAttribute(farUvs, 2));
+  farGeometry.setAttribute('color', new T.Float32BufferAttribute(farColors, 3));
+  farGeometry.computeBoundingBox(); farGeometry.computeBoundingSphere();
+  return { geometry, farGeometry, material, sourceSize: size.toArray() };
 }
 
 const CELL = 48;
@@ -107,12 +127,14 @@ function bladeGeometry(stem = false) {
 }
 
 export function createMeadowPlants(scene, field, { mobile = false, model = null } = {}) {
-  const range = mobile ? 330 : 450;
-  // grass.fbx is a rounded multi-blade clump (220 triangles), so using the
-  // old single-blade capacity would multiply the scene cost unnecessarily.
-  // Area grows by 3x in each dimension while density is reduced by 60%.
-  // Scale the cap accordingly so the wider ring actually gets populated.
-  const capacity = model ? (mobile ? 2700 : 6300) : (mobile ? 28000 : 64000);
+  const range = mobile ? 660 : 900;
+  const nearRange = mobile ? 240 : 330;
+  // The close ring keeps the supplied model. The distant ring uses its
+  // quarter-triangle LOD, so doubling the loaded radius does not double the
+  // expensive near geometry.
+  const capacity = model ? (mobile ? 1620 : 3780) : (mobile ? 28000 : 64000);
+  const farCapacity = model ? (mobile ? 4000 : 10000) : 0;
+  const densityKeep = model ? .6 : 1;
   const uniforms = { meadowTime: { value: 0 }, meadowFocus: { value: new T.Vector3() }, meadowRange: { value: range } };
   function material(flower = false) {
     const mat = flower ? new T.MeshBasicMaterial({ color: 0xffffff, side: T.DoubleSide })
@@ -141,9 +163,11 @@ export function createMeadowPlants(scene, field, { mobile = false, model = null 
   const grassGeometry = model?.geometry || bladeGeometry();
   const grassMaterial = model?.material || material();
   const grass = new T.InstancedMesh(grassGeometry, grassMaterial, capacity);
+  const farGrass = model?.farGeometry ? new T.InstancedMesh(model.farGeometry, grassMaterial, farCapacity) : null;
   const stems = new T.InstancedMesh(bladeGeometry(true), material(), Math.ceil(capacity * .14));
   const blooms = new T.InstancedMesh(new T.CircleGeometry(.30, 12), material(true), stems.instanceMatrix.count);
-  for (const [mesh, name] of [[grass, 'MeadowBlades'], [stems, 'MeadowStems'], [blooms, 'MeadowRoundFlowers']]) {
+  const renderMeshes = [[grass, 'MeadowBlades'], ...(farGrass ? [[farGrass, 'MeadowFarBlades']] : []), [stems, 'MeadowStems'], [blooms, 'MeadowRoundFlowers']];
+  for (const [mesh, name] of renderMeshes) {
     mesh.name = name; mesh.count = 0; mesh.frustumCulled = false;
     mesh.castShadow = false; mesh.receiveShadow = false;
     mesh.instanceMatrix.setUsage(T.DynamicDrawUsage); scene.add(mesh);
@@ -155,7 +179,7 @@ export function createMeadowPlants(scene, field, { mobile = false, model = null 
   function update(time, focus) {
     uniforms.meadowTime.value = time; uniforms.meadowFocus.value.copy(focus);
     if (last.distanceToSquared(focus) < 36) return;
-    last.copy(focus); let gi = 0, fi = 0;
+    last.copy(focus); let gi = 0, fgi = 0, fi = 0;
     const cells = [], reach = Math.ceil(range / CELL);
     const cx = Math.floor(focus.x / CELL), cy = Math.floor(focus.y / CELL), cz = Math.floor(focus.z / CELL);
     for (let x = cx - reach; x <= cx + reach; x++) for (let y = cy - reach; y <= cy + reach; y++) for (let z = cz - reach; z <= cz + reach; z++) {
@@ -164,24 +188,31 @@ export function createMeadowPlants(scene, field, { mobile = false, model = null 
     }
     cells.sort((a, b) => a.distance - b.distance);
     for (const { data } of cells) for (let i = 0; i < data.length; i += 5) {
-      p.fromArray(data, i); if (p.distanceToSquared(focus) > range * range) continue;
+      p.fromArray(data, i); const distanceSq = p.distanceToSquared(focus); if (distanceSq > range * range) continue;
       const seed = data[i + 3], flower = data[i + 4] > 0;
-      if (gi >= capacity || (mobile && seed < .22)) continue;
+      if (seed > densityKeep || (mobile && seed < .22)) continue;
       up.copy(p).normalize(); q.setFromUnitVectors(axis, up).multiply(yaw.setFromAxisAngle(axis, seed * Math.PI * 2));
       const size = .68 + seed * .55;
       // Sink roots slightly so no sliver appears between blades and sloping land.
       matrix.compose(p.addScaledVector(up, -.08), q, scale.set(size, size, size));
-      grass.setMatrixAt(gi++, matrix);
-      grass.setColorAt(gi - 1, grassTints[Math.min(grassTints.length - 1, Math.floor(seed * grassTints.length))]);
+      const tint = grassTints[Math.min(grassTints.length - 1, Math.floor(seed * grassTints.length))];
+      if (distanceSq <= nearRange * nearRange) {
+        if (gi >= capacity) continue;
+        grass.setMatrixAt(gi, matrix); grass.setColorAt(gi, tint); gi++;
+      } else if (farGrass) {
+        if (fgi >= farCapacity) continue;
+        farGrass.setMatrixAt(fgi, matrix); farGrass.setColorAt(fgi, tint); fgi++;
+      } else continue;
       if (flower && fi < stems.instanceMatrix.count) {
         stems.setMatrixAt(fi, matrix); blooms.setMatrixAt(fi, matrix);
         blooms.setColorAt(fi, colors[Math.min(colors.length - 1, Math.floor(seed * colors.length))]); fi++;
       }
     }
-    grass.count = gi; stems.count = blooms.count = fi;
-    for (const mesh of [grass, stems, blooms]) mesh.instanceMatrix.needsUpdate = true;
+    grass.count = gi; if (farGrass) farGrass.count = fgi; stems.count = blooms.count = fi;
+    for (const mesh of [grass, farGrass, stems, blooms]) if (mesh) mesh.instanceMatrix.needsUpdate = true;
     if (grass.instanceColor) grass.instanceColor.needsUpdate = true;
+    if (farGrass?.instanceColor) farGrass.instanceColor.needsUpdate = true;
     if (blooms.instanceColor) blooms.instanceColor.needsUpdate = true;
   }
-  return { update, grass, stems, blooms, stats: { ...field.stats, maxGrass: capacity, range, drawCalls: 3 } };
+  return { update, grass, farGrass, stems, blooms, stats: { ...field.stats, maxGrass: capacity + farCapacity, nearRange, range, drawCalls: farGrass ? 4 : 3 } };
 }
