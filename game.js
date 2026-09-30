@@ -2080,8 +2080,7 @@ function updateCamera(dt) {
     return;
   }
 
-  /* 镜头的距离和高度也按 S 放大，屏幕上人还是那么大，但楼变小了——
-     这正是「人和车太小」要的效果。速度项不用乘 S，速度本身已经乘过了。 */
+  /* 跟随镜头按场景尺度 S 定位；速度本身已经乘过 S。 */
   const wide = scenicView || introPreview;
   scene.fog.near += ((wide ? 620 : CFG.fog[0]) - scene.fog.near) * Math.min(1, dt * 3);
   scene.fog.far += ((wide ? 1450 : CFG.fog[1]) - scene.fog.far) * Math.min(1, dt * 3);
@@ -2092,11 +2091,11 @@ function updateCamera(dt) {
     camera.lookAt(lookGoal);
     return;
   }
-  const base = state.onBike ? 12.6 * S + Math.abs(state.speed) * 0.16 : 7.2 * S + foot.speed * 0.2;
+  const base = state.onBike ? 9.0 * S + Math.abs(state.speed) * 0.11 : 7.2 * S + foot.speed * 0.2;
   const back = cameraDistance(base);
-  const high = (state.onBike ? 5.6 : 3.0) * S;
+  const high = (state.onBike ? 4.3 : 3.0) * S;
   camGoal.copy(p).addScaledVector(_cDir, -back).addScaledVector(_cUp, high + back * 0.22);
-  lookGoal.copy(p).addScaledVector(_cDir, 4.2 * S).addScaledVector(_cUp, (state.onBike ? 1.3 : 1.1) * S);
+  lookGoal.copy(p).addScaledVector(_cDir, (state.onBike ? 3.0 : 4.2) * S).addScaledVector(_cUp, (state.onBike ? 1.3 : 1.1) * S);
   camera.position.lerp(camGoal, Math.min(1, dt * (state.onBike ? 6 : 7)));
   camera.lookAt(lookGoal);
 }
