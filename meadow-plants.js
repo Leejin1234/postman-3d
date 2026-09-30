@@ -1,5 +1,42 @@
 import * as T from 'three';
+import { FBXLoader } from './vendor/loaders/FBXLoader.js';
 import { lakeMetric } from './lakeside.js?v=20260930-22';
+
+export const GRASS_MODEL_URL = './assets/trees/grass-v1.fbx';
+export const GRASS_TEXTURE_URL = './assets/trees/grass-v1-mask.png';
+
+export function loadGrassModel(buffer, texture) {
+  const root = new FBXLoader().parse(buffer, './assets/trees/');
+  root.updateMatrixWorld(true);
+  const meshes = [];
+  root.traverse(o => { if (o.isMesh) meshes.push(o); });
+  if (meshes.length !== 1) throw new Error('grass.fbx 需要单一草模型网格');
+  const source = meshes[0], geometry = source.geometry.index ? source.geometry.toNonIndexed() : source.geometry.clone();
+  geometry.applyMatrix4(source.matrixWorld);
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox, size = box.getSize(new T.Vector3());
+  if (!(size.y > 0)) throw new Error('grass.fbx 高度无效');
+  const center = new T.Vector3((box.min.x + box.max.x) * .5, box.min.y, (box.min.z + box.max.z) * .5);
+  geometry.translate(-center.x, -center.y, -center.z);
+  // The source is authored in millimetres. Fit the supplied silhouette to the
+  // existing meadow blade height while keeping its broad, soft shape.
+  geometry.scale(.82 / size.y, .82 / size.y, .82 / size.y);
+  geometry.computeBoundingBox(); geometry.computeBoundingSphere();
+  if (texture) { texture.colorSpace = T.NoColorSpace; texture.wrapS = texture.wrapT = T.ClampToEdgeWrapping; texture.needsUpdate = true; }
+  const material = new T.MeshLambertMaterial({
+    name: 'HeartTownGrass', map: texture || null, color: 0xffffff,
+    transparent: true, alphaTest: .28, side: T.DoubleSide, vertexColors: true
+  });
+  const pos = geometry.attributes.position, colors = new Float32Array(pos.count * 3);
+  const minY = geometry.boundingBox.min.y, maxY = geometry.boundingBox.max.y;
+  const bottom = new T.Color('#8eae55'), top = new T.Color('#d8e992'), c = new T.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const t = T.MathUtils.smoothstep(pos.getY(i), minY, maxY);
+    c.copy(bottom).lerp(top, t); colors.set(c.toArray(), i * 3);
+  }
+  geometry.setAttribute('color', new T.Float32BufferAttribute(colors, 3));
+  return { geometry, material, sourceSize: size.toArray() };
+}
 
 const CELL = 48;
 const key = (x, y, z) => `${x},${y},${z}`;
@@ -69,7 +106,7 @@ function bladeGeometry(stem = false) {
   geo.computeVertexNormals(); return geo;
 }
 
-export function createMeadowPlants(scene, field, { mobile = false } = {}) {
+export function createMeadowPlants(scene, field, { mobile = false, model = null } = {}) {
   const range = mobile ? 85 : 120, capacity = mobile ? 28000 : 64000;
   const uniforms = { meadowTime: { value: 0 }, meadowFocus: { value: new T.Vector3() }, meadowRange: { value: range } };
   function material(flower = false) {
@@ -96,7 +133,9 @@ export function createMeadowPlants(scene, field, { mobile = false } = {}) {
     mat.customProgramCacheKey = () => `meadow-v1-${flower}`;
     return mat;
   }
-  const grass = new T.InstancedMesh(bladeGeometry(), material(), capacity);
+  const grassGeometry = model?.geometry || bladeGeometry();
+  const grassMaterial = model?.material || material();
+  const grass = new T.InstancedMesh(grassGeometry, grassMaterial, capacity);
   const stems = new T.InstancedMesh(bladeGeometry(true), material(), Math.ceil(capacity * .14));
   const blooms = new T.InstancedMesh(new T.CircleGeometry(.30, 12), material(true), stems.instanceMatrix.count);
   for (const [mesh, name] of [[grass, 'MeadowBlades'], [stems, 'MeadowStems'], [blooms, 'MeadowRoundFlowers']]) {

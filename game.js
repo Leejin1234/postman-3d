@@ -10,7 +10,7 @@ import { raiseGrassLevel } from './grass-level.js?v=20260930-22';
 import { createCollisionWorld, sweepSphere } from './collision-world.js?v=20260929-15';
 import { installSurfaceMaterials } from './surface-materials.js?v=20260929-11';
 import { installSoftTerrain, smoothTerrainNormals } from './soft-terrain.js?v=20260929-11';
-import { scatterMeadow, createMeadowPlants } from './meadow-plants.js?v=20260930-31';
+import { scatterMeadow, createMeadowPlants, loadGrassModel, GRASS_MODEL_URL, GRASS_TEXTURE_URL } from './meadow-plants.js?v=20261001-01';
 import { replaceStylizedTrees, loadTreeTrunk, TREE_TRUNK_URL } from './stylized-trees.js?v=20260930-32';
 import { roundSceneRocks } from './rounded-rocks.js?v=20260929-19';
 import { installFloatingStick } from './floating-stick.js?v=20260929-16';
@@ -2325,7 +2325,14 @@ async function boot() {
     }
     return true;
   });
-  meadowPlants = createMeadowPlants(scene, meadowField, { mobile: IS_MOBILE });
+  setProgress(0.67, '替换草模型与贴图…');
+  const grassAsset = await withRetry(GRASS_MODEL_URL, async () => {
+    const [grassBuffer, grassTexture] = await Promise.all([
+      fetchAsset(GRASS_MODEL_URL), loadTex(GRASS_TEXTURE_URL)
+    ]);
+    return loadGrassModel(grassBuffer, grassTexture);
+  });
+  meadowPlants = createMeadowPlants(scene, meadowField, { mobile: IS_MOBILE, model: grassAsset });
   if (DEBUG) console.info('Meadow plants:', meadowPlants.stats);
   buildMiniImage();
   await new Promise(r => setTimeout(r, 16));
